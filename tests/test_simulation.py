@@ -1,7 +1,5 @@
 """Integration / smoke tests for simdualkc.simulation.run_simulation."""
 
-from __future__ import annotations
-
 import datetime
 
 import pytest

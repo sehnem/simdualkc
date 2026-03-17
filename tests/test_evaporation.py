@@ -1,7 +1,5 @@
 """Unit tests for simdualkc.evaporation."""
 
-from __future__ import annotations
-
 import pytest
 
 from simdualkc.evaporation import (

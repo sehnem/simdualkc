@@ -1,7 +1,5 @@
 """Integration tests using reference data from the original database."""
 
-from __future__ import annotations
-
 import pytest
 
 from simdualkc import load_crop_params, load_soil_params

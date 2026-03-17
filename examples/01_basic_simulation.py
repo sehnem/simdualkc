@@ -6,10 +6,21 @@ referencing the Rosa et al. (2012) study.
 
 import datetime
 
-from simdualkc import load_crop_params, load_soil_params, run_simulation, to_dataframe
+from simdualkc import (
+    list_crops,
+    list_soils,
+    load_crop_params,
+    load_soil_params,
+    run_simulation,
+    to_dataframe,
+)
 from simdualkc.models import ClimateRecord, InitialConditions, SimulationConfig
 
-# 1. Load reference parameters
+# 1. List available materials
+print("Available crops in database:", list_crops())
+print("Available soils in database:", list_soils())
+
+# 2. Load reference parameters
 crop = load_crop_params("MilhoAlvalade2005_IA")
 soil = load_soil_params("Clay")
 

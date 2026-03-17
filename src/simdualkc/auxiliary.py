@@ -4,6 +4,9 @@ All functions are stateless and operate on scalar floats.
 """
 
 import math
+from pathlib import Path
+
+import pandas as pd
 
 # AMC class boundaries (CN adjustment ratios):
 #   AMC I  (dry):  CN_I  = CN_II / (2.281 - 0.01281 * CN_II)   [USDA NRCS]
@@ -173,3 +176,46 @@ def compute_cr_parametric(
     if z_wt <= 0.0:
         return 0.0
     return (a_c / (z_wt**b_c)) * math.exp(-c_c * lai**d_c)
+
+
+def get_crop_list() -> pd.DataFrame:
+    """Return a summary table of all crops in the database.
+
+    Returns:
+        DataFrame with columns: Cultura_ID, Cultura.
+    """
+    data_path = Path(__file__).parent / "data" / "crops.parquet"
+    df = pd.read_parquet(data_path)
+    return df[["Cultura_ID", "Cultura"]]
+
+
+def get_crop_details(crop_id: int) -> pd.Series:
+    """Return detailed parameters for a specific crop by ID.
+
+    Args:
+        crop_id: The unique Cultura_ID.
+
+    Returns:
+        Series containing all 107 columns for the selected crop.
+
+    Raises:
+        ValueError: If crop_id is not found.
+    """
+    data_path = Path(__file__).parent / "data" / "crops.parquet"
+    df = pd.read_parquet(data_path)
+    match = df[df["Cultura_ID"] == crop_id]
+    if match.empty:
+        msg = f"Crop ID {crop_id} not found in database."
+        raise ValueError(msg)
+    return match.iloc[0]
+
+
+def get_soil_list() -> pd.DataFrame:
+    """Return a summary table of all soil types in the database.
+
+    Returns:
+        DataFrame with columns: Solo_ID, Solo.
+    """
+    data_path = Path(__file__).parent / "data" / "soils.parquet"
+    df = pd.read_parquet(data_path)
+    return df[["Solo_ID", "Solo"]]

@@ -1,7 +1,5 @@
 """Unit tests for simdualkc.auxiliary."""
 
-from __future__ import annotations
-
 from itertools import pairwise
 
 import pytest

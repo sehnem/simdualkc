@@ -1,7 +1,5 @@
 """Tests — conftest.py: shared fixtures for all test modules."""
 
-from __future__ import annotations
-
 import datetime
 
 import pytest

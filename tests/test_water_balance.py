@@ -1,7 +1,5 @@
 """Unit tests for simdualkc.water_balance."""
 
-from __future__ import annotations
-
 import pytest
 
 from simdualkc.water_balance import (

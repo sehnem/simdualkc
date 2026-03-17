@@ -1,7 +1,5 @@
 """Unit tests for simdualkc.kcb."""
 
-from __future__ import annotations
-
 import datetime
 from itertools import pairwise
 
