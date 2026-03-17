@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "simdualkc-core"
+version = "0.1.0"
+description = "Mathematical core for the SIMDualKc dual crop coefficient water balance model (FAO-56)"
+readme = "README.md"
+license = { text = "GPL-3.0" }
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "pyarrow>=15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "ty>=0.0.1a1",
+    "pre-commit>=3.7",
+]
+viz = [
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/simdualkc"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/simdualkc/py.typed" = "simdualkc/py.typed"
+
+# ---------------------------------------------------------------------------
+# Ruff — linting + formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "I",    # isort
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "ANN",  # flake8-annotations (type hints)
+    "N",    # pep8-naming
+    "C4",   # flake8-comprehensions
+]
+ignore = [
+    "ANN101",  # missing type annotation for `self`
+    "ANN102",  # missing type annotation for `cls`
+    "ANN401",  # allow `Any` in some cases
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["simdualkc"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# ty — type checking
+# ---------------------------------------------------------------------------
+[tool.ty]
+# ty resolves imports from the src layout automatically
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -v"
+
+[tool.coverage.run]
+source = ["src/simdualkc"]
