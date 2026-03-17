@@ -1106,6 +1106,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+viz = [
+    { name = "matplotlib" },
+    { name = "seaborn" },
+]
+
+[package.dev-dependencies]
 dev = [
     { name = "pre-commit" },
     { name = "pytest" },
@@ -1113,26 +1119,26 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
-viz = [
-    { name = "matplotlib" },
-    { name = "seaborn" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "pyarrow", specifier = ">=15.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "seaborn", marker = "extra == 'viz'", specifier = ">=0.13" },
-    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1a1" },
 ]
-provides-extras = ["dev", "viz"]
+provides-extras = ["viz"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pre-commit", specifier = ">=3.7" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-cov", specifier = ">=5.0" },
+    { name = "ruff", specifier = ">=0.4" },
+    { name = "ty", specifier = ">=0.0.1a1" },
+]
 
 [[package]]
 name = "six"

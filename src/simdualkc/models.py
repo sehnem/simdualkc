@@ -224,7 +224,8 @@ class SalinityParams(BaseModel):
         ec_e: Soil salinity (electrical conductivity of saturation extract) [dS/m].
         ec_threshold: Crop specific salinity threshold [dS/m].
         b: Yield loss per unit increase in salinity [% per dS/m].
-        k_y: Yield response factor used to relate salinity yield reduction to transpiration reduction [—].
+        k_y: Yield response factor used to relate salinity yield reduction
+            to transpiration reduction [—].
     """
 
     ec_e: float = Field(ge=0.0, description="Soil salinity ECe [dS/m]")
@@ -238,11 +239,14 @@ class MulchParams(BaseModel):
 
     Attributes:
         f_mulch: Fraction of the total ground surface covered by mulch [0–1].
-        kr_mulch: Evaporation reduction factor for the mulched area (e.g., 0.5 for organic, 0.1 for plastic) [0–1].
+        kr_mulch: Evaporation reduction factor for the mulched area
+            (e.g., 0.5 for organic, 0.1 for plastic) [0–1].
     """
 
     f_mulch: float = Field(ge=0.0, le=1.0, description="Fraction of ground covered by mulch [0–1]")
-    kr_mulch: float = Field(ge=0.0, le=1.0, description="Mulch evaporation reduction multiplier [0–1]")
+    kr_mulch: float = Field(
+        ge=0.0, le=1.0, description="Mulch evaporation reduction multiplier [0–1]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +272,14 @@ class SimulationConfig(BaseModel):
     climate: list[ClimateRecord]
     initial_conditions: InitialConditions
     irrigation: list[IrrigationEvent] = Field(default_factory=list)
-    fw_base: float = Field(default=1.0, ge=0.0, le=1.0, description="Default irrigation wetting fraction")
+    fw_base: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Default irrigation wetting fraction"
+    )
     dp_method: DPMethod = Field(default=DPMethod.SIMPLE)
     cr_method: CRMethod = CRMethod.NONE
-    yield_params: YieldParams | None = Field(default=None, description="Stewart yield model parameters")
+    yield_params: YieldParams | None = Field(
+        default=None, description="Stewart yield model parameters"
+    )
     salinity: SalinityParams | None = Field(default=None, description="Salinity stress parameters")
     mulch: MulchParams | None = Field(default=None, description="Mulch surface cover parameters")
 
@@ -371,11 +379,13 @@ class DailyResult(BaseModel):
 
 class SimulationResult(BaseModel):
     """Container for the full simulation output.
-    
+
     Attributes:
         daily_results: List of daily time-step results.
-        yield_act: Actual crop yield [kg/ha] computed via Stewart model (if `yield_params` provided).
-        yield_decrease_pct: Percentage yield decrease due to water stress [%] (if `yield_params` provided).
+        yield_act: Actual crop yield [kg/ha] computed via Stewart model
+            (if `yield_params` provided).
+        yield_decrease_pct: Percentage yield decrease due to water stress [%]
+            (if `yield_params` provided).
     """
 
     daily_results: list[DailyResult]

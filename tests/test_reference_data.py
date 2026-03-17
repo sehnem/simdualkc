@@ -19,6 +19,7 @@ def test_load_maize_reference_data() -> None:
     assert crop.zr_max == pytest.approx(0.6)
     assert crop.h_max == pytest.approx(2.0)
 
+
 def test_load_soil_reference_data() -> None:
     """Verify we can load standard soil parameters."""
     soil = load_soil_params("Clay")
@@ -29,6 +30,7 @@ def test_load_soil_reference_data() -> None:
     # Agua_disponivel_med was 180 -> TAW = 0.18 m/m
     # theta_fc default 0.35 -> theta_wp = 0.17
     assert pytest.approx(soil.theta_fc - soil.theta_wp) == 0.18
+
 
 def test_list_data_assets() -> None:
     """Verify listing functions work."""

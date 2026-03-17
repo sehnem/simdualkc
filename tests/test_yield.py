@@ -2,7 +2,8 @@
 
 from simdualkc.yield_model import compute_yield_decrease_transpiration
 
-def test_compute_yield_decrease():
+
+def test_compute_yield_decrease() -> None:
     y_a, decrease_pct = compute_yield_decrease_transpiration(
         t_act_sum=80.0,
         t_pot_sum=100.0,
@@ -13,7 +14,7 @@ def test_compute_yield_decrease():
     assert abs(decrease_pct - 24.0) < 1e-6
 
 
-def test_compute_yield_decrease_no_stress():
+def test_compute_yield_decrease_no_stress() -> None:
     y_a, decrease_pct = compute_yield_decrease_transpiration(
         t_act_sum=100.0,
         t_pot_sum=100.0,
@@ -24,7 +25,7 @@ def test_compute_yield_decrease_no_stress():
     assert decrease_pct == 0.0
 
 
-def test_compute_yield_extreme_stress():
+def test_compute_yield_extreme_stress() -> None:
     y_a, decrease_pct = compute_yield_decrease_transpiration(
         t_act_sum=0.0,
         t_pot_sum=100.0,

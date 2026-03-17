@@ -21,10 +21,10 @@ def test_maize_validation_rosa_etal() -> None:
     climate = [
         ClimateRecord(
             date=base + datetime.timedelta(days=i),
-            eto=6.0,    # High ETo in Mediterranean summer
-            precip=0.0, # Dry summer
+            eto=6.0,  # High ETo in Mediterranean summer
+            precip=0.0,  # Dry summer
             u2=2.0,
-            rh_min=45.0
+            rh_min=45.0,
         )
         for i in range(100)
     ]
@@ -32,12 +32,7 @@ def test_maize_validation_rosa_etal() -> None:
     # 3. Running with initial stress
     ic = InitialConditions(dr0=10, dei0=10, dep0=10)
 
-    config = SimulationConfig(
-        soil=soil,
-        crop=crop,
-        climate=climate,
-        initial_conditions=ic
-    )
+    config = SimulationConfig(soil=soil, crop=crop, climate=climate, initial_conditions=ic)
 
     result = run_simulation(config)
 

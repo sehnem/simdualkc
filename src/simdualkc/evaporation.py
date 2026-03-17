@@ -34,10 +34,10 @@ def compute_few(
           - ``fewp``: fraction wetted by precipitation only [0–1].
     """
     exposed = max(0.0, 1.0 - fc)
-    
+
     # Mulch typically covers the exposed soil. We cap actual mulch cover to exposed.
     f_m_actual = min(exposed, f_mulch)
-    
+
     # The effective exposed area is reduced by the mulch cover weighted by its
     # effectiveness (where kr_mulch=1.0 means no reduction, kr_mulch<1 means reduction).
     effective_exposed = exposed - f_m_actual * (1.0 - kr_mulch)

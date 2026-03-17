@@ -185,7 +185,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         taw = compute_taw(soil.theta_fc, soil.theta_wp, zr)
         raw = compute_raw(taw, p)
         ks = compute_ks(dr, taw, raw, p)
-        
+
         if config.salinity:
             ks_sal = compute_ks_salinity(
                 config.salinity.ec_e,
@@ -201,7 +201,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         etc_act = compute_etc_act(ks, kcb, ke, eto)
         transp_act = ks * kcb * eto
         evap_act = ke * eto
-        
+
         t_act_sum += transp_act
         t_pot_sum += kcb * eto
 

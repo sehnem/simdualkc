@@ -14,15 +14,18 @@ from simdualkc.models import CropParams, SoilParams
 if TYPE_CHECKING:
     pass
 
+
 def _get_data_path() -> Path:
     """Get the path to the internal data directory."""
     # This works both in dev and when installed as a package
     return Path(str(importlib.resources.files("simdualkc") / "data"))
 
+
 def list_crops() -> list[str]:
     """List all available crop names in the reference database."""
     df = pd.read_parquet(_get_data_path() / "T_Cultura.parquet")
     return df["Cultura"].dropna().unique().tolist()
+
 
 def load_crop_params(name: str) -> CropParams:
     """Load crop parameters by name from the reference database."""
@@ -57,10 +60,12 @@ def load_crop_params(name: str) -> CropParams:
         ml=float(data["ml"]) if not pd.isna(data["ml"]) else 1.5,
     )
 
+
 def list_soils() -> list[str]:
     """List all available soil names in the reference database."""
     df = pd.read_parquet(_get_data_path() / "T_Solo.parquet")
     return df["Solo"].dropna().unique().tolist()
+
 
 def load_soil_params(name: str) -> SoilParams:
     """Load soil parameters by name from the reference database."""
@@ -89,5 +94,5 @@ def load_soil_params(name: str) -> SoilParams:
         rew=float(data["REW_cal"]),
         tew=float(data["TEW_cal"]),
         ze=0.15,  # Default for most studies unless specified
-        cn2=75.0, # Default, T_Solo doesn't seem to have CN2 directly (it's in T_Runoff)
+        cn2=75.0,  # Default, T_Solo doesn't seem to have CN2 directly (it's in T_Runoff)
     )
