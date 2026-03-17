@@ -151,9 +151,6 @@ cython_debug/
 .ty/
 .ruff_cache/
 
-# uv
-# uv.lock is intentionally committed for reproducible installs
-
 /ref
 
 # Generated example output
