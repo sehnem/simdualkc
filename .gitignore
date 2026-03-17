@@ -152,6 +152,7 @@ cython_debug/
 .ruff_cache/
 
 /ref
+/database_export
 
 # Generated example output
 examples/plots/

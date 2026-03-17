@@ -1,17 +1,11 @@
-"""Root zone water balance and water stress — FAO-56 / teoria.md §4.
+"""Root zone water balance and water stress.
 
 All functions are stateless and operate on scalar floats.
 """
 
-from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# §4.1 — Soil water thresholds
-# ---------------------------------------------------------------------------
-
 
 def compute_taw(theta_fc: float, theta_wp: float, zr: float) -> float:
-    """Compute Total Available Water in the root zone (teoria.md §4.1).
+    """Compute Total Available Water in the root zone.
 
     ``TAW = 1000 * (θ_FC - θ_WP) * Zr``
 
@@ -27,7 +21,7 @@ def compute_taw(theta_fc: float, theta_wp: float, zr: float) -> float:
 
 
 def compute_raw(taw: float, p: float) -> float:
-    """Compute Readily Available Water (teoria.md §4.1).
+    """Compute Readily Available Water.
 
     ``RAW = p * TAW``
 
@@ -39,11 +33,6 @@ def compute_raw(taw: float, p: float) -> float:
         RAW [mm].
     """
     return p * taw
-
-
-# ---------------------------------------------------------------------------
-# §4.1/§4.2 — Water stress coefficient Ks
-# ---------------------------------------------------------------------------
 
 
 def compute_ks_salinity(ec_e: float, ec_threshold: float, b: float, k_y: float) -> float:
@@ -69,7 +58,7 @@ def compute_ks_salinity(ec_e: float, ec_threshold: float, b: float, k_y: float) 
 
 
 def compute_ks(dr: float, taw: float, raw: float, p: float) -> float:
-    """Compute the water stress coefficient Ks (teoria.md §4.1).
+    """Compute the water stress coefficient Ks.
 
     - If ``Dr ≤ RAW``: ``Ks = 1`` (no stress).
     - If ``Dr > RAW``: ``Ks = (TAW - Dr) / ((1 - p) * TAW)``.
@@ -94,13 +83,8 @@ def compute_ks(dr: float, taw: float, raw: float, p: float) -> float:
     return max(0.0, (taw - dr) / denominator)
 
 
-# ---------------------------------------------------------------------------
-# §1 / §4.2 — Actual evapotranspiration
-# ---------------------------------------------------------------------------
-
-
 def compute_etc_act(ks: float, kcb: float, ke: float, eto: float) -> float:
-    """Compute actual crop evapotranspiration (teoria.md §1 / §4.2).
+    """Compute actual crop evapotranspiration.
 
     ``ETc_act = (Ks * Kcb + Ke) * ETo``
 
@@ -116,11 +100,6 @@ def compute_etc_act(ks: float, kcb: float, ke: float, eto: float) -> float:
     return (ks * kcb + ke) * eto
 
 
-# ---------------------------------------------------------------------------
-# §4.2 — Root zone depletion update
-# ---------------------------------------------------------------------------
-
-
 def update_root_zone_depletion(
     dr_prev: float,
     precip: float,
@@ -130,7 +109,7 @@ def update_root_zone_depletion(
     etc_act: float,
     taw: float,
 ) -> tuple[float, float]:
-    """Update root-zone soil water depletion for day i (teoria.md §4.2).
+    """Update root-zone soil water depletion for day i.
 
     ``Dr,i = Dr,i-1 - (P - RO) - I - CR + ETc_act + DP``
 

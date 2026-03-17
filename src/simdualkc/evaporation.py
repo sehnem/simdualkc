@@ -1,15 +1,9 @@
-"""Soil evaporation equations — FAO-56 §6 / teoria.md §3.
+"""Soil evaporation equations.
 
 Implements the two-fraction SIMDualKc evaporation approach:
   - fewi: soil wet by irrigation AND precipitation
   - fewp: soil wet by precipitation only
 """
-
-from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# §3 — Evaporative soil fractions
-# ---------------------------------------------------------------------------
 
 
 def compute_few(
@@ -18,7 +12,7 @@ def compute_few(
     f_mulch: float = 0.0,
     kr_mulch: float = 1.0,
 ) -> tuple[float, float]:
-    """Compute the two evaporative soil surface fractions (teoria.md §3 / Mulches).
+    """Compute the two evaporative soil surface fractions.
 
     Args:
         fc: Fractional soil cover by the canopy [0–1].
@@ -48,18 +42,13 @@ def compute_few(
     return fewi, fewp
 
 
-# ---------------------------------------------------------------------------
-# §3.1 — Upper limit Kc_max
-# ---------------------------------------------------------------------------
-
-
 def compute_kc_max(
     kcb: float,
     u2: float,
     rh_min: float,
     h: float,
 ) -> float:
-    """Compute the upper limit for Kc (teoria.md §3.1).
+    """Compute the upper limit for Kc.
 
     ``Kc_max = max({1.2 + [0.04(u2-2) - 0.004(RHmin-45)](h/3)^0.3}, {Kcb + 0.05})``
 
@@ -76,11 +65,6 @@ def compute_kc_max(
     return max(kc_base, kcb + 0.05)
 
 
-# ---------------------------------------------------------------------------
-# §3.1 — Energy partitioning weight W
-# ---------------------------------------------------------------------------
-
-
 def compute_evaporation_weight(
     fewi: float,
     fewp: float,
@@ -88,7 +72,7 @@ def compute_evaporation_weight(
     dei: float,
     dep: float,
 ) -> float:
-    """Compute the energy partitioning weight W between the two fractions (teoria.md §3.1).
+    """Compute the energy partitioning weight W between the two fractions.
 
     ``W = 1 / (1 + fewp*(TEW - Dep) / (fewi*(TEW - Dei)))``
 
@@ -113,13 +97,8 @@ def compute_evaporation_weight(
     return 1.0 / (1.0 + denom_ratio)
 
 
-# ---------------------------------------------------------------------------
-# §3.2 — Evaporation reduction coefficients Kr
-# ---------------------------------------------------------------------------
-
-
 def compute_kr(tew: float, rew: float, de_prev: float) -> float:
-    """Compute the evaporation reduction coefficient Kr (teoria.md §3.2).
+    """Compute the evaporation reduction coefficient Kr.
 
     ``Kr = (TEW - De) / (TEW - REW)``  clipped to [0, 1].
 
@@ -140,11 +119,6 @@ def compute_kr(tew: float, rew: float, de_prev: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-# ---------------------------------------------------------------------------
-# §3.1 — Final Ke coefficients
-# ---------------------------------------------------------------------------
-
-
 def compute_ke(
     kri: float,
     krp: float,
@@ -154,7 +128,7 @@ def compute_ke(
     fewi: float,
     fewp: float,
 ) -> tuple[float, float, float]:
-    """Compute soil evaporation coefficients for both fractions (teoria.md §3.1).
+    """Compute soil evaporation coefficients for both fractions.
 
     ``Kei = Kri * W * (Kc_max - Kcb)  ≤  fewi * Kc_max``
     ``Kep = Krp * (1-W) * (Kc_max - Kcb) ≤ fewp * Kc_max``
@@ -181,11 +155,6 @@ def compute_ke(
     return kei, kep, kei + kep
 
 
-# ---------------------------------------------------------------------------
-# §3.3 — Evaporative layer depletion update
-# ---------------------------------------------------------------------------
-
-
 def update_evaporative_depletion(
     de_prev: float,
     precip: float,
@@ -198,7 +167,7 @@ def update_evaporative_depletion(
     *,
     is_irrigated_fraction: bool,
 ) -> tuple[float, float]:
-    """Update depletion of one evaporative layer fraction for day j (teoria.md §3.3).
+    """Update depletion of one evaporative layer fraction for day j.
 
     For the **irrigated fraction** (fewi)::
 

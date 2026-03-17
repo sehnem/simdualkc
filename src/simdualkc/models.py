@@ -4,8 +4,6 @@ All models perform strict validation at construction time so that
 downstream equation functions can assume clean, physically-plausible inputs.
 """
 
-from __future__ import annotations
-
 import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -74,14 +72,14 @@ class SoilParams(BaseModel):
     gmax: float | None = Field(default=None, ge=0.0, description="Max capillary rise [mm/day]")
 
     @model_validator(mode="after")
-    def _theta_order(self) -> SoilParams:
+    def _theta_order(self) -> "SoilParams":
         if self.theta_wp >= self.theta_fc:
             msg = "theta_wp must be less than theta_fc"
             raise ValueError(msg)
         return self
 
     @model_validator(mode="after")
-    def _tew_rew_order(self) -> SoilParams:
+    def _tew_rew_order(self) -> "SoilParams":
         if self.rew >= self.tew:
             msg = "rew must be less than tew"
             raise ValueError(msg)
@@ -395,9 +393,8 @@ class SimulationResult(BaseModel):
     if TYPE_CHECKING:
         import pandas as pd
 
-    def to_dataframe(self) -> pd.DataFrame:
+    def to_dataframe(self) -> "pd.DataFrame":
         """Convert daily results to a pandas DataFrame (one row per day)."""
-        import pandas as pd
 
         return pd.DataFrame([r.model_dump() for r in self.daily_results])
 

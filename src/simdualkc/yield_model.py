@@ -3,8 +3,6 @@
 Implements yield decrease functions based on transpiration deficits.
 """
 
-from __future__ import annotations
-
 
 def compute_yield_decrease_transpiration(
     t_act_sum: float,

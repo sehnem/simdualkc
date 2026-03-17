@@ -1,7 +1,5 @@
 """Data loading utilities for SIMDualKc reference datasets."""
 
-from __future__ import annotations
-
 import datetime
 import importlib.resources
 from pathlib import Path
@@ -23,13 +21,13 @@ def _get_data_path() -> Path:
 
 def list_crops() -> list[str]:
     """List all available crop names in the reference database."""
-    df = pd.read_parquet(_get_data_path() / "T_Cultura.parquet")
+    df = pd.read_parquet(_get_data_path() / "crops.parquet")
     return df["Cultura"].dropna().unique().tolist()
 
 
 def load_crop_params(name: str) -> CropParams:
     """Load crop parameters by name from the reference database."""
-    df = pd.read_parquet(_get_data_path() / "T_Cultura.parquet")
+    df = pd.read_parquet(_get_data_path() / "crops.parquet")
     row = df[df["Cultura"] == name]
     if row.empty:
         raise ValueError(f"Crop '{name}' not found in database.")
@@ -43,7 +41,7 @@ def load_crop_params(name: str) -> CropParams:
         kcb_end=float(data["kcb_end"]),
         # Note: If plant_date isn't in DB (it's often simulation-specific),
         # we might need to handle it or use a default.
-        # T_Cultura has L_ini which is a date string in some cases,
+        # crops.parquet has L_ini which is a date string in some cases,
         # but often we want to set it ourselves.
         plant_date=datetime.date(2024, 1, 1),  # Placeholder, should be overridden
         stage_lengths=[
@@ -63,13 +61,13 @@ def load_crop_params(name: str) -> CropParams:
 
 def list_soils() -> list[str]:
     """List all available soil names in the reference database."""
-    df = pd.read_parquet(_get_data_path() / "T_Solo.parquet")
+    df = pd.read_parquet(_get_data_path() / "soils.parquet")
     return df["Solo"].dropna().unique().tolist()
 
 
 def load_soil_params(name: str) -> SoilParams:
     """Load soil parameters by name from the reference database."""
-    df = pd.read_parquet(_get_data_path() / "T_Solo.parquet")
+    df = pd.read_parquet(_get_data_path() / "soils.parquet")
     row = df[df["Solo"] == name]
     if row.empty:
         raise ValueError(f"Soil '{name}' not found in database.")

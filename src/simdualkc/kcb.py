@@ -1,18 +1,11 @@
-"""Basal crop coefficient (Kcb) equations — FAO-56 §4 / teoria.md §2.
+"""Basal crop coefficient (Kcb) equations.
 
 All functions are stateless and operate on scalar floats.
-References to equations in the docstrings match `teoria.md`.
 """
-
-from __future__ import annotations
 
 import math
 
 from simdualkc.models import CropParams
-
-# ---------------------------------------------------------------------------
-# §2.1 — Climate adjustment of tabulated Kcb
-# ---------------------------------------------------------------------------
 
 
 def adjust_kcb_climate(
@@ -21,7 +14,7 @@ def adjust_kcb_climate(
     rh_min: float,
     h: float,
 ) -> float:
-    """Adjust a tabulated Kcb value for local climate conditions (teoria.md §2.1).
+    """Adjust a tabulated Kcb value for local climate conditions.
 
     The standard FAO-56 table values assume RHmin=45 % and u2=2 m/s.
     Adjustment is only applied when ``kcb_tab > 0.45``.
@@ -63,17 +56,12 @@ def compute_kcb_full(
     return adjust_kcb_climate(kcb_tab, u2, rh_min, h)
 
 
-# ---------------------------------------------------------------------------
-# §2.2 — Density / partial cover adjustment
-# ---------------------------------------------------------------------------
-
-
 def compute_kd(
     fc_eff: float,
     h: float,
     ml: float,
 ) -> float:
-    """Compute the crop density coefficient Kd (teoria.md §2.2).
+    """Compute the crop density coefficient Kd.
 
     Args:
         fc_eff: Effective fractional soil cover [0–1].
@@ -95,7 +83,7 @@ def compute_kcb_density(
     kd: float,
     kcb_full: float,
 ) -> float:
-    """Compute Kcb adjusted for partial canopy cover (teoria.md §2.2).
+    """Compute Kcb adjusted for partial canopy cover.
 
     Formula: ``Kcb = Kc_min + Kd * (Kcb_full - Kc_min)``
 
@@ -108,11 +96,6 @@ def compute_kcb_density(
         Adjusted Kcb [—].
     """
     return kc_min + kd * (kcb_full - kc_min)
-
-
-# ---------------------------------------------------------------------------
-# Growth stage interpolation helpers
-# ---------------------------------------------------------------------------
 
 
 def _stage_day_bounds(crop: CropParams) -> list[tuple[int, int]]:

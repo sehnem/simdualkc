@@ -1,9 +1,7 @@
 """Daily simulation orchestrator — SIMDualKc Layer 1.
 
-Implements the full daily loop from teoria.md §"Passo-a-Passo", steps 3.1–3.10.
+Implements the full daily loop.
 """
-
-from __future__ import annotations
 
 import datetime
 
@@ -71,8 +69,6 @@ def _get_irrigation(
 def run_simulation(config: SimulationConfig) -> SimulationResult:
     """Run the SIMDualKc daily simulation loop.
 
-    Implements teoria.md §Passo-a-Passo, steps 3.1–3.10 for each day.
-
     Args:
         config: Fully validated simulation configuration.
 
@@ -102,36 +98,26 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         u2 = climate.u2
         rh_min = climate.rh_min
 
-        # ------------------------------------------------------------------
-        # Step 3.1 — Interpolate growth parameters
-        # ------------------------------------------------------------------
+        # Interpolate growth parameters
         zr = interpolate_growth_param(day_of_sim, crop, "zr")
         h = interpolate_growth_param(day_of_sim, crop, "h")
         fc = interpolate_growth_param(day_of_sim, crop, "fc")
         p = interpolate_growth_param(day_of_sim, crop, "p")
         stage = get_stage(day_of_sim, crop)
 
-        # ------------------------------------------------------------------
-        # Step 3.2 — Read met + interpolate / adjust Kcb
-        # ------------------------------------------------------------------
+        # Read met + interpolate / adjust Kcb
         kcb_tab = interpolate_kcb(day_of_sim, crop, u2, rh_min)
         kcb_full = compute_kcb_full(kcb_tab, u2, rh_min, h)
         kd = compute_kd(fc, h, crop.ml)
         kcb = compute_kcb_density(crop.kc_min, kd, kcb_full)
 
-        # ------------------------------------------------------------------
-        # Step 3.1 — Get irrigation for this day
-        # ------------------------------------------------------------------
+        # Get irrigation for this day
         irrig, fw = _get_irrigation(date, config.irrigation, config.fw_base)
 
-        # ------------------------------------------------------------------
-        # Step 3.3 — Kc_max
-        # ------------------------------------------------------------------
+        # Kc_max
         kc_max = compute_kc_max(kcb, u2, rh_min, h)
 
-        # ------------------------------------------------------------------
-        # Step 3.4 — fewi, fewp, W, Kr coefficients
-        # ------------------------------------------------------------------
+        # fewi, fewp, W, Kr coefficients
         f_mulch = config.mulch.f_mulch if config.mulch else 0.0
         kr_mulch = config.mulch.kr_mulch if config.mulch else 1.0
         fewi, fewp = compute_few(fc, fw, f_mulch=f_mulch, kr_mulch=kr_mulch)
@@ -141,14 +127,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         kri = compute_kr(soil.tew, soil.rew, dei)
         krp = compute_kr(soil.tew, soil.rew, dep)
 
-        # ------------------------------------------------------------------
-        # Step 3.5 — Ke coefficients
-        # ------------------------------------------------------------------
+        # Ke coefficients
         kei, kep, ke = compute_ke(kri, krp, w, kc_max, kcb, fewi, fewp)
 
-        # ------------------------------------------------------------------
-        # Step 3.6 — Surface balance: RO, then evaporative layer depletion
-        # ------------------------------------------------------------------
+        # Surface balance: RO, then evaporative layer depletion
         cn_adj = adjust_cn_for_moisture(soil.cn2, dei, soil.tew)
         ro = compute_runoff_cn(precip, cn_adj)
 
@@ -179,9 +161,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             is_irrigated_fraction=False,
         )
 
-        # ------------------------------------------------------------------
-        # Step 3.7 — Ks (using previous day's Dr and salinity)
-        # ------------------------------------------------------------------
+        # Ks (using previous day's Dr and salinity)
         taw = compute_taw(soil.theta_fc, soil.theta_wp, zr)
         raw = compute_raw(taw, p)
         ks = compute_ks(dr, taw, raw, p)
@@ -195,9 +175,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             )
             ks *= ks_sal
 
-        # ------------------------------------------------------------------
-        # Step 3.8 — ETc_act
-        # ------------------------------------------------------------------
+        # ETc_act
         etc_act = compute_etc_act(ks, kcb, ke, eto)
         transp_act = ks * kcb * eto
         evap_act = ke * eto
@@ -205,14 +183,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_act_sum += transp_act
         t_pot_sum += kcb * eto
 
-        # ------------------------------------------------------------------
-        # Step 3.9 — Capillary rise
-        # ------------------------------------------------------------------
+        # Capillary rise
         cr = _compute_cr(config, dr, raw)
 
-        # ------------------------------------------------------------------
-        # Step 3.9 — Root-zone depletion update + deep percolation
-        # ------------------------------------------------------------------
+        # Root-zone depletion update + deep percolation
         if config.dp_method == DPMethod.PARAMETRIC and soil.a_d and soil.b_d:
             # Parametric: compute storage above field capacity, then DP
             dr_tentative = dr - max(0.0, precip - ro) - irrig - cr + etc_act
@@ -231,9 +205,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 taw=taw,
             )
 
-        # ------------------------------------------------------------------
         # Record and advance state
-        # ------------------------------------------------------------------
         results.append(
             DailyResult(
                 date=date,

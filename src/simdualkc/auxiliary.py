@@ -1,20 +1,9 @@
-"""Auxiliary flux models — RO (Curve Number), DP, CR (teoria.md §5).
-
-Implements:
-  §5.1  Surface runoff — SCS Curve Number method with moisture adjustment.
-  §5.2  Deep percolation — simple excess and Liu et al. (2006) parametric.
-  §5.3  Capillary rise — constant Gmax and Liu et al. (2006) parametric.
+"""Auxiliary flux models — RO (Curve Number), DP, CR.
 
 All functions are stateless and operate on scalar floats.
 """
 
-from __future__ import annotations
-
 import math
-
-# ---------------------------------------------------------------------------
-# §5.1 — Surface runoff (SCS Curve Number)
-# ---------------------------------------------------------------------------
 
 # AMC class boundaries (CN adjustment ratios):
 #   AMC I  (dry):  CN_I  = CN_II / (2.281 - 0.01281 * CN_II)   [USDA NRCS]
@@ -51,7 +40,7 @@ def adjust_cn_for_moisture(cn2: float, dei: float, tew: float) -> float:
 
     Linearly interpolates between AMC I (dry, ``dei == tew``) and
     AMC III (wet, ``dei == 0``).  This links surface soil moisture
-    state to the curve number adjustment (teoria.md §5.1).
+    state to the curve number adjustment.
 
     Args:
         cn2: Base Curve Number, AMC II.
@@ -70,7 +59,7 @@ def adjust_cn_for_moisture(cn2: float, dei: float, tew: float) -> float:
 
 
 def compute_runoff_cn(precip: float, cn: float) -> float:
-    """Compute surface runoff using the SCS Curve Number method (teoria.md §5.1).
+    """Compute surface runoff using the SCS Curve Number method.
 
     ``q = (P - 0.2*S)² / (P + 0.8*S)``  where  ``S = 25400/CN - 254``  [mm]
 
@@ -91,13 +80,8 @@ def compute_runoff_cn(precip: float, cn: float) -> float:
     return (precip - ia) ** 2 / (precip + 0.8 * s)
 
 
-# ---------------------------------------------------------------------------
-# §5.2 — Deep percolation
-# ---------------------------------------------------------------------------
-
-
 def compute_dp_simple(dr_before_dp: float) -> float:
-    """Compute deep percolation using the simple excess-water method (teoria.md §5.2).
+    """Compute deep percolation using the simple excess-water method.
 
     Any water that would make the root zone exceed field capacity
     (i.e. ``Dr < 0``) immediately percolates.
@@ -118,7 +102,7 @@ def compute_dp_simple(dr_before_dp: float) -> float:
 
 
 def compute_dp_parametric(storage: float, a_d: float, b_d: float) -> float:
-    """Compute deep percolation via Liu et al. (2006) parametric model (teoria.md §5.2).
+    """Compute deep percolation via Liu et al. (2006) parametric model.
 
     ``DP = a_D * Storage^b_D``
 
@@ -135,13 +119,8 @@ def compute_dp_parametric(storage: float, a_d: float, b_d: float) -> float:
     return a_d * (storage**b_d)
 
 
-# ---------------------------------------------------------------------------
-# §5.3 — Capillary rise
-# ---------------------------------------------------------------------------
-
-
 def compute_cr_constant(gmax: float, dr: float, raw: float) -> float:
-    """Compute capillary rise using the constant Gmax approach (teoria.md §5.3).
+    """Compute capillary rise using the constant Gmax approach.
 
     The full Gmax applies when the root zone is stressed (``Dr > RAW``).
     When the soil is adequately moist (``Dr ≤ RAW``), CR is reduced
@@ -171,7 +150,7 @@ def compute_cr_parametric(
     c_c: float,
     d_c: float,
 ) -> float:
-    """Compute capillary rise via Liu et al. (2006) parametric model (teoria.md §5.3).
+    """Compute capillary rise via Liu et al. (2006) parametric model.
 
     The functional form is typically:
 
