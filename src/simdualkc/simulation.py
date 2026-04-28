@@ -35,10 +35,16 @@ from simdualkc.kcb import (
     compute_kcb_with_groundcover,
     compute_kd,
     get_fc,
+    get_forage_cycle_and_day,
+    get_forage_stage,
     get_lai,
     get_stage,
+    interpolate_forage_fc,
+    interpolate_forage_kcb,
+    interpolate_forage_param,
     interpolate_growth_param,
     interpolate_kcb,
+    is_forage_cut_day,
 )
 from simdualkc.models import (
     ClimateRecord,
@@ -113,21 +119,38 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         u2 = climate.u2
         rh_min = climate.rh_min
 
-        # Interpolate growth parameters
-        zr = interpolate_growth_param(day_of_sim, crop, "zr")
-        h = interpolate_growth_param(day_of_sim, crop, "h")
-        fc = get_fc(day_of_sim, crop)
-        p = interpolate_growth_param(day_of_sim, crop, "p")
-        stage = get_stage(day_of_sim, crop)
+        is_forage_mode = crop.is_forage and crop.forage_params is not None
 
-        # Read met + interpolate / adjust Kcb
-        kcb_tab = interpolate_kcb(day_of_sim, crop, u2, rh_min)
-        kcb_full = compute_kcb_full(kcb_tab, u2, rh_min, h)
-        kd = compute_kd(fc, h, crop.ml)
-        if config.groundcover:
-            kcb = compute_kcb_with_groundcover(kcb_full, config.groundcover.kcb_cover, kd)
+        # Interpolate growth parameters (forage or standard)
+        if is_forage_mode and crop.forage_params is not None:
+            zr = interpolate_forage_param(day_of_sim, crop.forage_params, "zr")
+            h = interpolate_forage_param(day_of_sim, crop.forage_params, "h")
+            fc = interpolate_forage_fc(day_of_sim, crop.forage_params)
+            p = interpolate_forage_param(day_of_sim, crop.forage_params, "p")
+            cycle_idx, day_in_cycle = get_forage_cycle_and_day(day_of_sim, crop.forage_params)
+            stg = get_forage_stage(
+                day_in_cycle,
+                crop.forage_params.cycles[min(cycle_idx, len(crop.forage_params.cycles) - 1)],
+            )
+            stage = stg
         else:
-            kcb = compute_kcb_density(crop.kc_min, kd, kcb_full)
+            zr = interpolate_growth_param(day_of_sim, crop, "zr")
+            h = interpolate_growth_param(day_of_sim, crop, "h")
+            fc = get_fc(day_of_sim, crop)
+            p = interpolate_growth_param(day_of_sim, crop, "p")
+            stage = get_stage(day_of_sim, crop)
+
+        # Read met + interpolate / adjust Kcb (forage or standard)
+        if is_forage_mode and crop.forage_params is not None:
+            kcb = interpolate_forage_kcb(day_of_sim, crop.forage_params, u2, rh_min)
+        else:
+            kcb_tab = interpolate_kcb(day_of_sim, crop, u2, rh_min)
+            kcb_full = compute_kcb_full(kcb_tab, u2, rh_min, h)
+            kd_val = compute_kd(fc, h, crop.ml)
+            if config.groundcover:
+                kcb = compute_kcb_with_groundcover(kcb_full, config.groundcover.kcb_cover, kd_val)
+            else:
+                kcb = compute_kcb_density(crop.kc_min, kd_val, kcb_full)
 
         # Get irrigation for this day (manual + automated)
         irrig, fw = _get_irrigation(date, config.irrigation, config.fw_base)
@@ -315,6 +338,18 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         dr = new_dr
         dei = new_dei
         dep = new_dep
+
+        # Cut day: cap depletion to post-cut TAW (root depth shrinks)
+        if crop.is_forage:
+            fp_cut = crop.forage_params
+            if fp_cut is not None and is_forage_cut_day(day_of_sim, fp_cut):
+                zr_next = fp_cut.min_root_m
+                taw_next = (
+                    compute_taw_multilayer(soil.layers, zr_next)
+                    if soil.uses_multilayer() and soil.layers
+                    else compute_taw(soil.theta_fc, soil.theta_wp, zr_next)
+                )
+                dr = min(dr, taw_next)
 
     y_a = None
     decrease_pct = None

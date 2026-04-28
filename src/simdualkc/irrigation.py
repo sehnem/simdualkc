@@ -1,6 +1,6 @@
 """Automated irrigation scheduling logic."""
 
-from simdualkc.kcb import get_stage
+from simdualkc.kcb import build_forage_cycle_map, get_stage
 from simdualkc.models import (
     CropParams,
     DeficitIrrigationStrategy,
@@ -91,7 +91,14 @@ def get_mad_for_day(
 def get_days_to_harvest(day_of_sim: int, crop: CropParams) -> int:
     """Days until harvest (harvest at end of stage 4).
 
+    For forage crops, returns days until the next cut date.
     Returns positive integer when before harvest, 0 or negative when at/past.
     """
+    if crop.is_forage and crop.forage_params:
+        cmap = build_forage_cycle_map(crop.forage_params)
+        for _, end, _ in cmap:
+            if day_of_sim <= end:
+                return end - day_of_sim
+        return 0
     total_days = sum(crop.stage_lengths)
     return total_days - day_of_sim

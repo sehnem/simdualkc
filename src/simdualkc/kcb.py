@@ -6,7 +6,7 @@ All functions are stateless and operate on scalar floats.
 import datetime
 import math
 
-from simdualkc.models import CropParams
+from simdualkc.models import CropParams, ForageCutCycle, ForageParams
 
 
 def lai_to_fc(lai: float, k_ext: float = 0.6) -> float:
@@ -90,10 +90,14 @@ def get_lai(day_of_sim: int, crop: CropParams) -> float:
     """Get Leaf Area Index for the day.
 
     If crop has LAI data, interpolates. Otherwise derives from fc.
+    For forage crops, derives from the forage-specific fc interpolation.
     """
     if crop.uses_lai() and crop.lai_values and crop.lai_dates:
         return interpolate_lai(day_of_sim, crop.lai_dates, crop.lai_values, crop.plant_date)
-    fc = interpolate_growth_param(day_of_sim, crop, "fc")
+    if crop.is_forage and crop.forage_params:
+        fc = interpolate_forage_fc(day_of_sim, crop.forage_params)
+    else:
+        fc = interpolate_growth_param(day_of_sim, crop, "fc")
     return fc_to_lai(fc, crop.k_ext)
 
 
@@ -101,8 +105,9 @@ def get_fc(day_of_sim: int, crop: CropParams) -> float:
     """Get effective fraction cover for the day.
 
     If crop has LAI data (lai_values, lai_dates), interpolates LAI and converts
-    to fc via fc = 1 - exp(-k_ext × LAI). Otherwise uses standard growth
-    interpolation of fc_max.
+    to fc via fc = 1 - exp(-k_ext × LAI).  For forage crops uses the
+    cut-cycle-based interpolation.  Otherwise uses standard growth interpolation
+    of fc_max.
 
     Args:
         day_of_sim: 1-based simulation day.
@@ -114,6 +119,8 @@ def get_fc(day_of_sim: int, crop: CropParams) -> float:
     if crop.uses_lai() and crop.lai_values and crop.lai_dates:
         lai = interpolate_lai(day_of_sim, crop.lai_dates, crop.lai_values, crop.plant_date)
         return lai_to_fc(lai, crop.k_ext)
+    if crop.is_forage and crop.forage_params:
+        return interpolate_forage_fc(day_of_sim, crop.forage_params)
     return interpolate_growth_param(day_of_sim, crop, "fc")
 
 
@@ -360,6 +367,239 @@ def interpolate_growth_param(
     fraction = (day_of_sim - start_day) / max(1, growth_end_day - start_day)
     fraction = max(0.0, min(1.0, fraction))
     return v_ini + fraction * (v_max - v_ini)
+
+
+# ---------------------------------------------------------------------------
+# Forage / multi-cut functions
+# ---------------------------------------------------------------------------
+
+
+def build_forage_cycle_map(
+    forage_params: ForageParams,
+) -> list[tuple[int, int, int]]:
+    """Pre-compute (start_day, end_day, cycle_index) for each cutting cycle.
+
+    Returns a list of triples, one per cycle. Day numbers are 1-based
+    relative to the forage start date.
+
+    Args:
+        forage_params: Forage crop parameters with cycle definitions.
+
+    Returns:
+        List of ``(start, end, cycle_idx)`` where *end* is the cut day.
+    """
+    cycle_map: list[tuple[int, int, int]] = []
+    day_cursor = 1
+    for idx, cycle in enumerate(forage_params.cycles):
+        total = sum(cycle.stage_lengths)
+        start = day_cursor
+        end = day_cursor + total - 1
+        cycle_map.append((start, end, idx))
+        day_cursor = end + 1
+    return cycle_map
+
+
+def get_forage_cycle_and_day(
+    day_of_sim: int,
+    forage_params: ForageParams,
+) -> tuple[int, int]:
+    """Determine which cutting cycle *day_of_sim* falls in.
+
+    Args:
+        day_of_sim: 1-based simulation day offset from forage start date.
+        forage_params: Forage crop parameters.
+
+    Returns:
+        ``(cycle_index, day_within_cycle)``.
+        If *day_of_sim* is past the last cut, returns the last cycle with
+        a day-within-cycle one past its total length.
+    """
+    cmap = build_forage_cycle_map(forage_params)
+    for start, end, idx in cmap:
+        if start <= day_of_sim <= end:
+            day_in_cycle = day_of_sim - start + 1
+            return idx, day_in_cycle
+    if day_of_sim > cmap[-1][0]:
+        last_start = cmap[-1][0]
+        overshoot = day_of_sim - last_start
+        return len(cmap) - 1, overshoot + 1
+    return 0, max(1, day_of_sim)
+
+
+def is_forage_cut_day(day_of_sim: int, forage_params: ForageParams) -> bool:
+    """Return True if *day_of_sim* is a cut day (last day of a cycle)."""
+    cmap = build_forage_cycle_map(forage_params)
+    return any(day_of_sim == end for _, end, _ in cmap)
+
+
+def get_forage_stage(day_in_cycle: int, cycle: ForageCutCycle) -> int:
+    """Return the FAO phenological stage (1–4) within a forage cut cycle.
+
+    Args:
+        day_in_cycle: 1-based day within the current cut cycle.
+        cycle: The cut cycle.
+
+    Returns:
+        Stage 1–4 (same meaning as standard FAO stages).
+    """
+    ini, dev, mid, late = cycle.stage_lengths
+    if day_in_cycle <= ini:
+        return 1
+    if day_in_cycle <= ini + dev:
+        return 2
+    if day_in_cycle <= ini + dev + mid:
+        return 3
+    return 4
+
+
+def interpolate_forage_kcb(
+    day_of_sim: int,
+    forage_params: ForageParams,
+    u2: float,
+    rh_min: float,
+) -> float:
+    """Interpolate Kcb within the current forage cut cycle.
+
+    Within each cycle Kcb follows:
+      - Stage 1 (ini): constant ``kcb_start``.
+      - Stage 2 (dev): linear to ``kcb_peak``.
+      - Stage 3 (mid): constant ``kcb_peak`` (climate-adjusted).
+      - Stage 4 (late): linear to ``kcb_before``.
+      - Cut day (end of cycle): ``kcb_before``.
+      - After last cycle: ``kcb_after``.
+
+    Args:
+        day_of_sim: 1-based simulation day.
+        forage_params: Forage crop parameters.
+        u2: Wind speed at 2 m [m/s].
+        rh_min: Minimum relative humidity [%].
+
+    Returns:
+        Kcb for the day [—].
+    """
+    cycle_idx, day_in_cycle = get_forage_cycle_and_day(day_of_sim, forage_params)
+    n_cycles = len(forage_params.cycles)
+
+    if cycle_idx >= n_cycles:
+        return forage_params.kcb_after
+
+    cycle = forage_params.cycles[cycle_idx]
+    ini, dev, mid, late = cycle.stage_lengths
+    total = ini + dev + mid + late
+
+    if day_in_cycle > total:
+        if cycle_idx == n_cycles - 1:
+            return forage_params.kcb_after
+        return forage_params.kcb_before
+
+    if day_in_cycle <= ini:
+        return forage_params.kcb_start
+
+    if day_in_cycle <= ini + dev:
+        frac = (day_in_cycle - ini) / max(1.0, float(dev))
+        return forage_params.kcb_start + frac * (forage_params.kcb_peak - forage_params.kcb_start)
+
+    if day_in_cycle <= ini + dev + mid:
+        h_mid = forage_params.max_height_m
+        return adjust_kcb_climate(forage_params.kcb_peak, u2, rh_min, h_mid)
+
+    if day_in_cycle < total:
+        frac = (day_in_cycle - ini - dev - mid) / max(1.0, float(late))
+        return forage_params.kcb_peak + frac * (forage_params.kcb_before - forage_params.kcb_peak)
+
+    return forage_params.kcb_before
+
+
+def interpolate_forage_fc(day_of_sim: int, forage_params: ForageParams) -> float:
+    """Interpolate fraction cover within the current forage cut cycle.
+
+    Args:
+        day_of_sim: 1-based simulation day.
+        forage_params: Forage crop parameters.
+
+    Returns:
+        Fraction cover [0–1].
+    """
+    cycle_idx, day_in_cycle = get_forage_cycle_and_day(day_of_sim, forage_params)
+    n_cycles = len(forage_params.cycles)
+
+    if cycle_idx >= n_cycles:
+        return forage_params.fc_after
+
+    cycle = forage_params.cycles[cycle_idx]
+    ini, dev, mid, late = cycle.stage_lengths
+    total = ini + dev + mid + late
+
+    if day_in_cycle > total:
+        if cycle_idx == n_cycles - 1:
+            return forage_params.fc_after
+        return forage_params.fc_before
+
+    if day_in_cycle <= ini:
+        return forage_params.fc_start
+
+    if day_in_cycle <= ini + dev:
+        frac = (day_in_cycle - ini) / max(1.0, float(dev))
+        return forage_params.fc_start + frac * (forage_params.fc_peak - forage_params.fc_start)
+
+    if day_in_cycle <= ini + dev + mid:
+        return forage_params.fc_peak
+
+    if day_in_cycle < total:
+        frac = (day_in_cycle - ini - dev - mid) / max(1.0, float(late))
+        return forage_params.fc_peak + frac * (forage_params.fc_before - forage_params.fc_peak)
+
+    return forage_params.fc_before
+
+
+def interpolate_forage_param(
+    day_of_sim: int,
+    forage_params: ForageParams,
+    param: str,
+) -> float:
+    """Interpolate a growth parameter within the forage cut cycle framework.
+
+    Supported parameters: ``"zr"``, ``"h"``, ``"p"``.
+
+    - ``zr``: Grows from ``min_root_m`` to ``max_root_m`` over
+      ``days_to_max_root`` days (resets each cycle).
+    - ``h``: Grows from ``min_height_m`` to ``max_height_m`` over stages 1–3
+      (same shape as standard crop height).
+    - ``p``: Constant at ``p_fraction``.
+
+    Args:
+        day_of_sim: 1-based simulation day.
+        forage_params: Forage crop parameters.
+        param: One of ``"zr"``, ``"h"``, ``"p"``.
+
+    Returns:
+        Interpolated parameter value.
+    """
+    if param == "p":
+        return forage_params.p_fraction
+
+    cycle_idx, day_in_cycle = get_forage_cycle_and_day(day_of_sim, forage_params)
+    cycle = forage_params.cycles[min(cycle_idx, len(forage_params.cycles) - 1)]
+
+    if param == "zr":
+        frac = min(1.0, (day_in_cycle - 1) / max(1.0, float(forage_params.days_to_max_root)))
+        return forage_params.min_root_m + frac * (
+            forage_params.max_root_m - forage_params.min_root_m
+        )
+
+    if param == "h":
+        ini, dev, mid, _ = cycle.stage_lengths
+        growth_end = ini + dev + mid
+        if day_in_cycle >= growth_end:
+            return forage_params.max_height_m
+        frac = (day_in_cycle - 1) / max(1.0, float(growth_end - 1))
+        frac = max(0.0, min(1.0, frac))
+        return forage_params.min_height_m + frac * (
+            forage_params.max_height_m - forage_params.min_height_m
+        )
+
+    msg = f"param must be one of {{'zr', 'h', 'p'}}, got {param!r}"
+    raise ValueError(msg)
 
 
 # Suppress unused import warning — math is used for potential callers

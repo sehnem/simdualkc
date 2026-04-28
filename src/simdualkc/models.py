@@ -150,6 +150,94 @@ class SoilParams(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ForageCutCycle(BaseModel):
+    """A single cutting cycle within a forage crop season.
+
+    Attributes:
+        stage_lengths: Four-element list [ini, dev, mid, late] day-counts for this cycle.
+        cut_date: Calendar date on which the cut occurs (last day of the cycle).
+    """
+
+    stage_lengths: list[int] = Field(min_length=4, max_length=4)
+    cut_date: datetime.date
+
+    @field_validator("stage_lengths")
+    @classmethod
+    def _positive_stages(cls, v: list[int]) -> list[int]:
+        if any(d <= 0 for d in v):
+            msg = "All stage lengths must be positive integers"
+            raise ValueError(msg)
+        return v
+
+
+class ForageParams(BaseModel):
+    """Crop-level parameters for forage multi-cut simulation.
+
+    Defines the Kcb, fc, root depth, and height envelope that each
+    cutting cycle follows.  Individual cycles may have different stage
+    durations (provided via cycles).
+
+    Attributes:
+        start_date: Calendar date the forage season begins (first planting).
+        num_cuts: Number of cutting cycles in the season.
+        max_height_m: Maximum plant height at peak growth [m].
+        min_root_m: Root depth immediately after a cut [m].
+        max_root_m: Maximum root depth reached during regrowth [m].
+        days_to_max_root: Days from cut to reach ForagMaxRoot.
+        p_fraction: Soil water depletion fraction for no stress [—].
+        fc_start: Fraction cover at the start of each cycle [0–1].
+        fc_peak: Fraction cover at mid-season peak [0–1].
+        fc_before: Fraction cover just before cutting [0–1].
+        fc_after: Fraction cover immediately after cutting [0–1].
+        kcb_start: Kcb at the start of regrowth [—].
+        kcb_peak: Kcb at mid-season peak [—].
+        kcb_before: Kcb just before cutting [—].
+        kcb_after: Kcb immediately after cutting [—].
+        min_height_m: Plant height immediately after a cut [m].
+        cycles: The sequence of cutting cycles with per-cycle durations and dates.
+    """
+
+    start_date: datetime.date
+    num_cuts: int = Field(ge=1, le=20)
+    max_height_m: float = Field(gt=0.0, le=20.0)
+    min_root_m: float = Field(gt=0.0, le=3.0)
+    max_root_m: float = Field(gt=0.0, le=3.0)
+    days_to_max_root: int = Field(ge=1)
+    p_fraction: float = Field(gt=0.0, lt=1.0)
+    fc_start: float = Field(ge=0.0, le=1.0)
+    fc_peak: float = Field(ge=0.0, le=1.0)
+    fc_before: float = Field(ge=0.0, le=1.0)
+    fc_after: float = Field(ge=0.0, le=1.0)
+    kcb_start: float = Field(ge=0.0, le=3.0)
+    kcb_peak: float = Field(ge=0.0, le=3.0)
+    kcb_before: float = Field(ge=0.0, le=3.0)
+    kcb_after: float = Field(ge=0.0, le=3.0)
+    min_height_m: float = Field(ge=0.0, le=20.0)
+    cycles: list[ForageCutCycle] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _cycle_order(self) -> "ForageParams":
+        dates = [c.cut_date for c in self.cycles]
+        if dates != sorted(dates):
+            msg = "forage cycles must be ordered by increasing cut_date"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _consistent_counts(self) -> "ForageParams":
+        if len(self.cycles) != self.num_cuts:
+            msg = f"cycles count ({len(self.cycles)}) must match num_cuts ({self.num_cuts})"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _fc_order(self) -> "ForageParams":
+        if self.fc_after > self.fc_start:
+            msg = "fc_after must be <= fc_start (cover after cut <= cover at regrowth start)"
+            raise ValueError(msg)
+        return self
+
+
 class CropParams(BaseModel):
     """Tabulated crop parameters for the four FAO-56 growth stages.
 
@@ -157,6 +245,10 @@ class CropParams(BaseModel):
     [ini, dev, mid, late].  The simulation interpolates Kcb linearly
     through ini and dev, holds it constant at mid, then interpolates
     through late.
+
+    For forage crops (``is_forage=True``), growth is governed by cut
+    cycles and the standard stage_lengths / Kcb values are ignored in
+    favour of :class:`ForageParams`.
 
     Attributes:
         kcb_ini: Basal crop coefficient — initial stage [—].
@@ -174,6 +266,8 @@ class CropParams(BaseModel):
         lai_values: Optional LAI at specific dates (alternative to fc_max).
         lai_dates: Dates corresponding to lai_values (must match length).
         k_ext: Light extinction coefficient for LAI→fc (0.5–0.7, default 0.6).
+        is_forage: If True, forage multi-cut mode is active.
+        forage_params: Forage-specific parameters (required if is_forage).
     """
 
     kcb_ini: float = Field(ge=0.0, le=3.0)
@@ -191,6 +285,10 @@ class CropParams(BaseModel):
     lai_values: list[float] | None = Field(default=None, description="LAI at lai_dates")
     lai_dates: list[datetime.date] | None = Field(default=None, description="Dates for LAI")
     k_ext: float = Field(default=0.6, ge=0.5, le=0.7, description="Light extinction coef")
+    is_forage: bool = Field(default=False, description="Enable forage multi-cut mode")
+    forage_params: ForageParams | None = Field(
+        default=None, description="Forage parameters (required if is_forage=True)"
+    )
 
     @field_validator("stage_lengths")
     @classmethod
@@ -211,6 +309,13 @@ class CropParams(BaseModel):
             and len(self.lai_values) != len(self.lai_dates)
         ):
             msg = "lai_values and lai_dates must have the same length"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _forage_consistency(self) -> "CropParams":
+        if self.is_forage and self.forage_params is None:
+            msg = "forage_params is required when is_forage=True"
             raise ValueError(msg)
         return self
 
