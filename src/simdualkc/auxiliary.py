@@ -178,6 +178,39 @@ def compute_cr_parametric(
     return (a_c / (z_wt**b_c)) * math.exp(-c_c * lai**d_c)
 
 
+def compute_cr_parametric_complete(
+    z_wt: float,
+    lai: float,
+    a1: float,
+    b1: float,
+    a2: float,
+    b2: float,
+    a3: float,
+    b3: float,
+    a4: float,
+    b4: float,
+) -> float:
+    """Compute capillary rise via Liu et al. (2006) full parametric model.
+
+    CR = (a1×z_wt^b1 + a2×z_wt^b2) × exp(-(a3×z_wt^b3 + a4×z_wt^b4)×LAI)
+
+    Parameters depend on soil texture (tutorial Slide 57).
+
+    Args:
+        z_wt: Water table depth from surface [m].
+        lai: Leaf area index [m²/m²].
+        a1, b1, a2, b2, a3, b3, a4, b4: Soil texture coefficients.
+
+    Returns:
+        Capillary rise [mm/day].
+    """
+    if z_wt <= 0.0:
+        return 0.0
+    depth_term = a1 * (z_wt**b1) + a2 * (z_wt**b2)
+    lai_exponent = (a3 * (z_wt**b3) + a4 * (z_wt**b4)) * lai
+    return depth_term * math.exp(-lai_exponent)
+
+
 def get_crop_list() -> pd.DataFrame:
     """Return a summary table of all crops in the database.
 

@@ -11,6 +11,7 @@ from simdualkc.auxiliary import (
     adjust_cn_for_moisture,
     compute_cr_constant,
     compute_cr_parametric,
+    compute_cr_parametric_complete,
     compute_dp_parametric,
     compute_runoff_cn,
 )
@@ -22,28 +23,41 @@ from simdualkc.evaporation import (
     compute_kr,
     update_evaporative_depletion,
 )
+from simdualkc.irrigation import (
+    compute_irrigation_depth,
+    get_days_to_harvest,
+    get_mad_for_day,
+    should_trigger_irrigation,
+)
 from simdualkc.kcb import (
     compute_kcb_density,
     compute_kcb_full,
+    compute_kcb_with_groundcover,
     compute_kd,
+    get_fc,
+    get_lai,
     get_stage,
     interpolate_growth_param,
     interpolate_kcb,
 )
 from simdualkc.models import (
+    ClimateRecord,
     CRMethod,
+    CropParams,
     DailyResult,
     DPMethod,
     IrrigationEvent,
     SimulationConfig,
     SimulationResult,
 )
+from simdualkc.reporting import compute_simulation_summary
 from simdualkc.water_balance import (
     compute_etc_act,
     compute_ks,
     compute_ks_salinity,
     compute_raw,
     compute_taw,
+    compute_taw_multilayer,
     update_root_zone_depletion,
 )
 from simdualkc.yield_model import compute_yield_decrease_transpiration
@@ -86,6 +100,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     dep = ic.dep0
 
     results: list[DailyResult] = []
+    last_irrigation_day = 0
 
     t_act_sum = 0.0
     t_pot_sum = 0.0
@@ -101,7 +116,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         # Interpolate growth parameters
         zr = interpolate_growth_param(day_of_sim, crop, "zr")
         h = interpolate_growth_param(day_of_sim, crop, "h")
-        fc = interpolate_growth_param(day_of_sim, crop, "fc")
+        fc = get_fc(day_of_sim, crop)
         p = interpolate_growth_param(day_of_sim, crop, "p")
         stage = get_stage(day_of_sim, crop)
 
@@ -109,10 +124,63 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         kcb_tab = interpolate_kcb(day_of_sim, crop, u2, rh_min)
         kcb_full = compute_kcb_full(kcb_tab, u2, rh_min, h)
         kd = compute_kd(fc, h, crop.ml)
-        kcb = compute_kcb_density(crop.kc_min, kd, kcb_full)
+        if config.groundcover:
+            kcb = compute_kcb_with_groundcover(kcb_full, config.groundcover.kcb_cover, kd)
+        else:
+            kcb = compute_kcb_density(crop.kc_min, kd, kcb_full)
 
-        # Get irrigation for this day
+        # Get irrigation for this day (manual + automated)
         irrig, fw = _get_irrigation(date, config.irrigation, config.fw_base)
+
+        # Automated irrigation (MAD threshold or deficit)
+        strat = config.irrigation_strategy
+        if strat.strategy_type == "mad_threshold" and strat.mad_threshold:
+            mad = get_mad_for_day(day_of_sim, crop, strat.mad_threshold)
+            days_to_harvest = get_days_to_harvest(day_of_sim, crop)
+            # taw/raw not yet computed; use from previous iteration
+            taw_for_irrig = (
+                compute_taw_multilayer(soil.layers, zr)
+                if soil.uses_multilayer() and soil.layers
+                else compute_taw(soil.theta_fc, soil.theta_wp, zr)
+            )
+            if should_trigger_irrigation(
+                dr=dr,
+                taw=taw_for_irrig,
+                mad_fraction=mad,
+                days_to_harvest=days_to_harvest,
+                harvest_stop_days=strat.mad_threshold.days_before_harvest_stop,
+                last_irrigation_day=last_irrigation_day,
+                current_day=day_of_sim,
+                min_interval=strat.mad_threshold.min_interval_days,
+            ):
+                irrig_auto = compute_irrigation_depth(
+                    dr, taw_for_irrig, strat.mad_threshold.target_pct_taw
+                )
+                irrig += irrig_auto
+                last_irrigation_day = day_of_sim
+        elif strat.strategy_type == "deficit" and strat.deficit:
+            mad = get_mad_for_day(day_of_sim, crop, strat.deficit)
+            days_to_harvest = get_days_to_harvest(day_of_sim, crop)
+            taw_for_irrig = (
+                compute_taw_multilayer(soil.layers, zr)
+                if soil.uses_multilayer() and soil.layers
+                else compute_taw(soil.theta_fc, soil.theta_wp, zr)
+            )
+            if should_trigger_irrigation(
+                dr=dr,
+                taw=taw_for_irrig,
+                mad_fraction=mad,
+                days_to_harvest=days_to_harvest,
+                harvest_stop_days=strat.deficit.days_before_harvest_stop,
+                last_irrigation_day=last_irrigation_day,
+                current_day=day_of_sim,
+                min_interval=1,
+            ):
+                irrig_auto = compute_irrigation_depth(
+                    dr, taw_for_irrig, strat.deficit.target_pct_taw
+                )
+                irrig += irrig_auto
+                last_irrigation_day = day_of_sim
 
         # Kc_max
         kc_max = compute_kc_max(kcb, u2, rh_min, h)
@@ -162,7 +230,10 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         )
 
         # Ks (using previous day's Dr and salinity)
-        taw = compute_taw(soil.theta_fc, soil.theta_wp, zr)
+        if soil.uses_multilayer() and soil.layers:
+            taw = compute_taw_multilayer(soil.layers, zr)
+        else:
+            taw = compute_taw(soil.theta_fc, soil.theta_wp, zr)
         raw = compute_raw(taw, p)
         ks = compute_ks(dr, taw, raw, p)
 
@@ -184,7 +255,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_pot_sum += kcb * eto
 
         # Capillary rise
-        cr = _compute_cr(config, dr, raw)
+        cr = _compute_cr(config, dr, raw, climate, crop, day_of_sim)
 
         # Root-zone depletion update + deep percolation
         if config.dp_method == DPMethod.PARAMETRIC and soil.a_d and soil.b_d:
@@ -255,14 +326,27 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             config.yield_params.y_m,
         )
 
+    summary = compute_simulation_summary(
+        results,
+        config.yield_params,
+        config.salinity,
+    )
     return SimulationResult(
         daily_results=results,
         yield_act=y_a,
         yield_decrease_pct=decrease_pct,
+        summary=summary,
     )
 
 
-def _compute_cr(config: SimulationConfig, dr: float, raw: float) -> float:
+def _compute_cr(
+    config: SimulationConfig,
+    dr: float,
+    raw: float,
+    climate: ClimateRecord,
+    crop: CropParams,
+    day_of_sim: int,
+) -> float:
     """Dispatch capillary rise computation based on configured method."""
     if config.cr_method == CRMethod.NONE:
         return 0.0
@@ -271,16 +355,41 @@ def _compute_cr(config: SimulationConfig, dr: float, raw: float) -> float:
         gmax = config.soil.gmax or 0.0
         return compute_cr_constant(gmax, dr, raw)
 
-    # PARAMETRIC — requires additional parameters not yet in SoilParams;
-    # returns 0.0 as a safe stub until Liu et al. params are provided.
-    return compute_cr_parametric(
-        z_wt=1.0,  # stub: 1 m depth to water table
-        lai=1.0,  # stub: LAI = 1
-        a_c=0.0,
-        b_c=1.0,
-        c_c=0.0,
-        d_c=1.0,
-    )
+    if config.cr_method == CRMethod.PARAMETRIC:
+        soil = config.soil
+        if (
+            soil.cr_a1 is not None
+            and soil.cr_b1 is not None
+            and soil.cr_a2 is not None
+            and soil.cr_b2 is not None
+            and soil.cr_a3 is not None
+            and soil.cr_b3 is not None
+            and soil.cr_a4 is not None
+            and soil.cr_b4 is not None
+            and climate.wt_depth_m is not None
+        ):
+            lai = get_lai(day_of_sim, crop)
+            return compute_cr_parametric_complete(
+                z_wt=climate.wt_depth_m,
+                lai=lai,
+                a1=soil.cr_a1,
+                b1=soil.cr_b1,
+                a2=soil.cr_a2,
+                b2=soil.cr_b2,
+                a3=soil.cr_a3,
+                b3=soil.cr_b3,
+                a4=soil.cr_a4,
+                b4=soil.cr_b4,
+            )
+        return compute_cr_parametric(
+            z_wt=climate.wt_depth_m if climate.wt_depth_m is not None else 1.0,
+            lai=get_lai(day_of_sim, crop),
+            a_c=0.0,
+            b_c=1.0,
+            c_c=0.0,
+            d_c=1.0,
+        )
+    return 0.0
 
 
 def to_dataframe(result: SimulationResult) -> pd.DataFrame:

@@ -3,9 +3,118 @@
 All functions are stateless and operate on scalar floats.
 """
 
+import datetime
 import math
 
 from simdualkc.models import CropParams
+
+
+def lai_to_fc(lai: float, k_ext: float = 0.6) -> float:
+    """Convert Leaf Area Index to effective fraction cover (FAO-56).
+
+    fc = 1 - exp(-K_ext × LAI)
+
+    Where K_ext is the light extinction coefficient (typically 0.5–0.7
+    depending on crop geometry).
+
+    Args:
+        lai: Leaf Area Index [m²/m²].
+        k_ext: Light extinction coefficient [—], default 0.6.
+
+    Returns:
+        Effective fraction cover [0–1].
+    """
+    if lai <= 0.0:
+        return 0.0
+    fc = 1.0 - math.exp(-k_ext * lai)
+    return min(1.0, fc)
+
+
+def interpolate_lai(
+    day_of_sim: int,
+    lai_dates: list[datetime.date],
+    lai_values: list[float],
+    plant_date: datetime.date,
+) -> float:
+    """Linearly interpolate LAI from discrete measurements by date.
+
+    Args:
+        day_of_sim: 1-based day index from planting.
+        lai_dates: Dates of LAI measurements (chronological).
+        lai_values: LAI values at those dates.
+        plant_date: Planting date.
+
+    Returns:
+        Interpolated LAI. Returns 0 before first date; holds last value after.
+    """
+    if not lai_dates or not lai_values:
+        return 0.0
+    current_date = plant_date + datetime.timedelta(days=day_of_sim - 1)
+
+    # Before first measurement — use 0 (pre-emergence) or first value at exact match
+    if current_date < lai_dates[0]:
+        return 0.0
+    if current_date == lai_dates[0]:
+        return lai_values[0]
+
+    # After last measurement — hold last value
+    if current_date >= lai_dates[-1]:
+        return lai_values[-1]
+
+    # Find bracketing dates and interpolate
+    for i in range(len(lai_dates) - 1):
+        if lai_dates[i] < current_date <= lai_dates[i + 1]:
+            d0 = (lai_dates[i] - plant_date).days + 1
+            d1 = (lai_dates[i + 1] - plant_date).days + 1
+            if d1 <= d0:
+                return lai_values[i]
+            fraction = (day_of_sim - d0) / (d1 - d0)
+            return lai_values[i] + fraction * (lai_values[i + 1] - lai_values[i])
+
+    return lai_values[-1]
+
+
+def fc_to_lai(fc: float, k_ext: float = 0.6) -> float:
+    """Invert fc = 1 - exp(-k_ext × LAI) to get LAI.
+
+    LAI = -ln(1 - fc) / k_ext
+    """
+    if fc <= 0.0:
+        return 0.0
+    if fc >= 1.0:
+        return 10.0  # Saturation, use large value
+    return -math.log(1.0 - fc) / k_ext
+
+
+def get_lai(day_of_sim: int, crop: CropParams) -> float:
+    """Get Leaf Area Index for the day.
+
+    If crop has LAI data, interpolates. Otherwise derives from fc.
+    """
+    if crop.uses_lai() and crop.lai_values and crop.lai_dates:
+        return interpolate_lai(day_of_sim, crop.lai_dates, crop.lai_values, crop.plant_date)
+    fc = interpolate_growth_param(day_of_sim, crop, "fc")
+    return fc_to_lai(fc, crop.k_ext)
+
+
+def get_fc(day_of_sim: int, crop: CropParams) -> float:
+    """Get effective fraction cover for the day.
+
+    If crop has LAI data (lai_values, lai_dates), interpolates LAI and converts
+    to fc via fc = 1 - exp(-k_ext × LAI). Otherwise uses standard growth
+    interpolation of fc_max.
+
+    Args:
+        day_of_sim: 1-based simulation day.
+        crop: Crop parameter set.
+
+    Returns:
+        Fraction cover [0–1].
+    """
+    if crop.uses_lai() and crop.lai_values and crop.lai_dates:
+        lai = interpolate_lai(day_of_sim, crop.lai_dates, crop.lai_values, crop.plant_date)
+        return lai_to_fc(lai, crop.k_ext)
+    return interpolate_growth_param(day_of_sim, crop, "fc")
 
 
 def adjust_kcb_climate(
@@ -96,6 +205,28 @@ def compute_kcb_density(
         Adjusted Kcb [—].
     """
     return kc_min + kd * (kcb_full - kc_min)
+
+
+def compute_kcb_with_groundcover(
+    kcb_full: float,
+    kcb_cover: float,
+    kd: float,
+) -> float:
+    """Combine main crop and groundcover Kcb (FAO-56 Eq. 11).
+
+    Kcb = Kcb_cover + Kd × max(Kcb_full - Kcb_cover, (Kcb_full - Kcb_cover)/2)
+
+    Args:
+        kcb_full: Main crop Kcb at full cover [—].
+        kcb_cover: Groundcover Kcb for non-shaded fraction [—].
+        kd: Density coefficient for main crop [—].
+
+    Returns:
+        Combined Kcb [—].
+    """
+    diff = kcb_full - kcb_cover
+    term = max(diff, diff / 2.0)
+    return kcb_cover + kd * term
 
 
 def _stage_day_bounds(crop: CropParams) -> list[tuple[int, int]]:

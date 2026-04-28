@@ -6,7 +6,7 @@ downstream equation functions can assume clean, physically-plausible inputs.
 
 import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -43,17 +43,54 @@ class CRMethod(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+class SoilLayer(BaseModel):
+    """Single layer in a stratified soil profile.
+
+    Layers are ordered by depth; each layer's depth_m is the bottom depth [m].
+    The first layer extends from 0 to depth_m; subsequent layers from the
+    previous layer's depth to this layer's depth.
+
+    Attributes:
+        depth_m: Bottom depth of layer [m] (top of layer is previous layer's bottom or 0).
+        theta_fc: Volumetric water content at field capacity [m³/m³].
+        theta_wp: Volumetric water content at wilting point [m³/m³].
+        sand_pct: Optional sand percentage for pedotransfer functions.
+        clay_pct: Optional clay percentage for pedotransfer functions.
+    """
+
+    depth_m: float = Field(gt=0.0, description="Bottom depth of layer [m]")
+    theta_fc: float = Field(gt=0.0, lt=1.0, description="Field capacity [m³/m³]")
+    theta_wp: float = Field(gt=0.0, lt=1.0, description="Wilting point [m³/m³]")
+    sand_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    clay_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+
+    @model_validator(mode="after")
+    def _theta_order(self) -> "SoilLayer":
+        if self.theta_wp >= self.theta_fc:
+            msg = "theta_wp must be less than theta_fc"
+            raise ValueError(msg)
+        return self
+
+
 class SoilParams(BaseModel):
     """Soil hydraulic and surface properties.
 
+    Supports either single-layer (theta_fc, theta_wp) or multi-layer (layers).
+    When layers is provided and non-empty, multi-layer TAW is used; otherwise
+    theta_fc and theta_wp define a uniform root zone.
+
     Attributes:
         theta_fc: Volumetric soil water content at field capacity [m³/m³].
+            Used when layers is None.
         theta_wp: Volumetric soil water content at wilting point [m³/m³].
+            Used when layers is None.
+        layers: Up to 5 soil layers for stratified profiles. When provided,
+            overrides theta_fc/theta_wp for TAW computation.
         ze: Depth of the surface evaporative layer [m].  Typically 0.10–0.15 m.
         rew: Readily evaporable water [mm].  Stage-1 evaporation capacity.
         tew: Total evaporable water [mm].  Maximum water extractable by evaporation.
         cn2: SCS Curve Number for average antecedent moisture conditions (AMC II).
-        a_d: Parametric drainage coefficient *a* (Liu et al. 2006) [—].
+        a_d: Parametric drainage coefficient *a* (Liu et al 2006) [—].
             Required when ``dp_method=DPMethod.PARAMETRIC``.
         b_d: Parametric drainage exponent *b* (Liu et al. 2006) [—].
             Required when ``dp_method=DPMethod.PARAMETRIC``.
@@ -63,6 +100,7 @@ class SoilParams(BaseModel):
 
     theta_fc: float = Field(gt=0.0, lt=1.0, description="Field capacity [m³/m³]")
     theta_wp: float = Field(gt=0.0, lt=1.0, description="Wilting point [m³/m³]")
+    layers: list[SoilLayer] | None = Field(default=None, max_length=5)
     ze: float = Field(default=0.10, gt=0.0, le=0.30, description="Evaporative layer depth [m]")
     rew: float = Field(gt=0.0, description="Readily evaporable water [mm]")
     tew: float = Field(gt=0.0, description="Total evaporable water [mm]")
@@ -70,6 +108,14 @@ class SoilParams(BaseModel):
     a_d: float | None = Field(default=None, description="Drainage coefficient a (Liu 2006)")
     b_d: float | None = Field(default=None, description="Drainage exponent b (Liu 2006)")
     gmax: float | None = Field(default=None, ge=0.0, description="Max capillary rise [mm/day]")
+    cr_a1: float | None = Field(default=None, description="Liu CR param a1")
+    cr_b1: float | None = Field(default=None, description="Liu CR param b1")
+    cr_a2: float | None = Field(default=None, description="Liu CR param a2")
+    cr_b2: float | None = Field(default=None, description="Liu CR param b2")
+    cr_a3: float | None = Field(default=None, description="Liu CR param a3")
+    cr_b3: float | None = Field(default=None, description="Liu CR param b3")
+    cr_a4: float | None = Field(default=None, description="Liu CR param a4")
+    cr_b4: float | None = Field(default=None, description="Liu CR param b4")
 
     @model_validator(mode="after")
     def _theta_order(self) -> "SoilParams":
@@ -84,6 +130,19 @@ class SoilParams(BaseModel):
             msg = "rew must be less than tew"
             raise ValueError(msg)
         return self
+
+    @model_validator(mode="after")
+    def _layers_ordered(self) -> "SoilParams":
+        if self.layers:
+            depths = [layer.depth_m for layer in self.layers]
+            if depths != sorted(depths):
+                msg = "layers must be ordered by increasing depth_m"
+                raise ValueError(msg)
+        return self
+
+    def uses_multilayer(self) -> bool:
+        """Return True if this soil uses multi-layer TAW computation."""
+        return bool(self.layers)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +171,9 @@ class CropParams(BaseModel):
         fc_max: Maximum fraction of soil surface covered by vegetation [—].
         ml: Canopy light extinction / density multiplier (1.5–2.0) [—].
         kc_min: Minimum Kc for bare/dry soil (default 0.15) [—].
+        lai_values: Optional LAI at specific dates (alternative to fc_max).
+        lai_dates: Dates corresponding to lai_values (must match length).
+        k_ext: Light extinction coefficient for LAI→fc (0.5–0.7, default 0.6).
     """
 
     kcb_ini: float = Field(ge=0.0, le=3.0)
@@ -126,6 +188,9 @@ class CropParams(BaseModel):
     fc_max: float = Field(gt=0.0, le=1.0, description="Max fraction of soil covered")
     ml: float = Field(default=1.5, ge=1.5, le=2.0, description="Canopy density multiplier")
     kc_min: float = Field(default=0.15, ge=0.0, le=0.5, description="Min Kc (bare soil)")
+    lai_values: list[float] | None = Field(default=None, description="LAI at lai_dates")
+    lai_dates: list[datetime.date] | None = Field(default=None, description="Dates for LAI")
+    k_ext: float = Field(default=0.6, ge=0.5, le=0.7, description="Light extinction coef")
 
     @field_validator("stage_lengths")
     @classmethod
@@ -135,10 +200,55 @@ class CropParams(BaseModel):
             raise ValueError(msg)
         return v
 
+    @model_validator(mode="after")
+    def _lai_consistency(self) -> "CropParams":
+        if (self.lai_values is None) != (self.lai_dates is None):
+            msg = "lai_values and lai_dates must both be provided or both be None"
+            raise ValueError(msg)
+        if (
+            self.lai_values is not None
+            and self.lai_dates is not None
+            and len(self.lai_values) != len(self.lai_dates)
+        ):
+            msg = "lai_values and lai_dates must have the same length"
+            raise ValueError(msg)
+        return self
+
+    def uses_lai(self) -> bool:
+        """Return True if LAI-based fraction cover should be used."""
+        return bool(self.lai_values and self.lai_dates)
+
 
 # ---------------------------------------------------------------------------
-# Climate
+# Climate & Weather
 # ---------------------------------------------------------------------------
+
+
+class WeatherRecord(BaseModel):
+    """Raw weather data for ETo calculation via FAO-56 Penman-Monteith.
+
+    Use :func:`simdualkc.eto.compute_eto` or :func:`simdualkc.eto.weather_to_climate_records`
+    to convert to ETo / ClimateRecord.
+
+    Attributes:
+        date: Calendar date.
+        t_max: Maximum temperature [°C].
+        t_min: Minimum temperature [°C].
+        rh_max: Maximum relative humidity [%].
+        rh_min: Minimum relative humidity [%].
+        rs: Solar radiation [MJ/m²/day].
+        u2: Wind speed at 2 m height [m/s].
+        precip: Precipitation [mm], default 0.
+    """
+
+    date: datetime.date
+    t_max: float = Field(description="Max temperature [°C]")
+    t_min: float = Field(description="Min temperature [°C]")
+    rh_max: float = Field(ge=0.0, le=100.0, description="Max relative humidity [%]")
+    rh_min: float = Field(ge=0.0, le=100.0, description="Min relative humidity [%]")
+    rs: float = Field(ge=0.0, description="Solar radiation [MJ/m²/day]")
+    u2: float = Field(ge=0.0, description="Wind speed at 2 m [m/s]")
+    precip: float = Field(default=0.0, ge=0.0, description="Precipitation [mm]")
 
 
 class ClimateRecord(BaseModel):
@@ -157,6 +267,9 @@ class ClimateRecord(BaseModel):
     precip: float = Field(ge=0.0, description="Precipitation [mm]")
     u2: float = Field(ge=0.0, description="Wind speed at 2 m [m/s]")
     rh_min: float = Field(ge=1.0, le=100.0, description="Min relative humidity [%]")
+    wt_depth_m: float | None = Field(
+        default=None, ge=0.0, description="Water table depth from surface [m]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +290,55 @@ class IrrigationEvent(BaseModel):
     date: datetime.date
     depth_mm: float = Field(gt=0.0, description="Net irrigation depth [mm]")
     fw: float = Field(default=1.0, gt=0.0, le=1.0, description="Wetted fraction [—]")
+
+
+class MADThresholdStrategy(BaseModel):
+    """Management Allowed Depletion threshold strategy.
+
+    Automatically triggers irrigation when root zone depletion exceeds
+    MAD × TAW. Refills to target percentage of TAW.
+
+    Attributes:
+        mad_fraction: Irrigation trigger when Dr >= mad_fraction × TAW [0–1].
+        target_pct_taw: Refill target as % of TAW (100 = full, <100 = deficit).
+        days_before_harvest_stop: Stop irrigating N days before harvest.
+        min_interval_days: Minimum days between irrigation events.
+    """
+
+    mad_fraction: float = Field(ge=0.0, le=1.0, description="MAD trigger fraction")
+    target_pct_taw: float = Field(
+        ge=0.0, le=100.0, default=100.0, description="Refill target % TAW"
+    )
+    days_before_harvest_stop: int = Field(
+        ge=0, default=0, description="Stop irrigation N days before harvest"
+    )
+    min_interval_days: int = Field(ge=1, default=1, description="Min days between events")
+
+
+class DeficitIrrigationStrategy(BaseModel):
+    """Controlled deficit irrigation with stage-specific MAD.
+
+    Attributes:
+        stage_mad: MAD fraction by stage key ("ini", "dev", "mid", "late").
+        target_pct_taw: Refill target % TAW.
+        days_before_harvest_stop: Stop irrigation N days before harvest.
+    """
+
+    stage_mad: dict[str, float] = Field(description="MAD by growth stage")
+    target_pct_taw: float = Field(ge=0.0, le=100.0, default=100.0)
+    days_before_harvest_stop: int = Field(ge=0, default=0)
+
+
+class IrrigationStrategy(BaseModel):
+    """Irrigation scheduling strategy.
+
+    When strategy_type is "manual", only pre-scheduled IrrigationEvents apply.
+    When "mad_threshold" or "deficit", automated scheduling adds events.
+    """
+
+    strategy_type: Literal["manual", "mad_threshold", "deficit"] = "manual"
+    mad_threshold: MADThresholdStrategy | None = None
+    deficit: DeficitIrrigationStrategy | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +394,23 @@ class SalinityParams(BaseModel):
     k_y: float = Field(default=1.0, gt=0.0, description="Yield response factor Ky [—]")
 
 
+class GroundcoverParams(BaseModel):
+    """Active groundcover (grass, weeds) competing with main crop.
+
+    Used in orchards/vineyards where inter-row vegetation affects Kcb.
+    Combines main crop and groundcover Kcb per FAO-56 Eq. 11-12.
+
+    Attributes:
+        kcb_cover: Kcb of groundcover for non-shaded soil [—].
+        fc_cover: Fraction of ground covered by vegetation [0–1].
+        h_cover: Height of groundcover [m].
+    """
+
+    kcb_cover: float = Field(ge=0.0, le=1.5, description="Kcb of groundcover")
+    fc_cover: float = Field(ge=0.0, le=1.0, description="Groundcover fraction")
+    h_cover: float = Field(ge=0.0, le=1.0, description="Groundcover height [m]")
+
+
 class MulchParams(BaseModel):
     """Parameters for surface mulch coverage.
 
@@ -270,6 +449,10 @@ class SimulationConfig(BaseModel):
     climate: list[ClimateRecord]
     initial_conditions: InitialConditions
     irrigation: list[IrrigationEvent] = Field(default_factory=list)
+    irrigation_strategy: IrrigationStrategy = Field(
+        default_factory=lambda: IrrigationStrategy(),
+        description="Automated irrigation scheduling strategy",
+    )
     fw_base: float = Field(
         default=1.0, ge=0.0, le=1.0, description="Default irrigation wetting fraction"
     )
@@ -280,6 +463,9 @@ class SimulationConfig(BaseModel):
     )
     salinity: SalinityParams | None = Field(default=None, description="Salinity stress parameters")
     mulch: MulchParams | None = Field(default=None, description="Mulch surface cover parameters")
+    groundcover: GroundcoverParams | None = Field(
+        default=None, description="Active groundcover parameters"
+    )
 
     @field_validator("climate")
     @classmethod
@@ -297,6 +483,48 @@ class SimulationConfig(BaseModel):
             msg = "climate records must be in chronological order"
             raise ValueError(msg)
         return v
+
+
+# ---------------------------------------------------------------------------
+# Summary models
+# ---------------------------------------------------------------------------
+
+
+class StressSummary(BaseModel):
+    """Seasonal stress accumulation summary."""
+
+    total_transp_pot: float
+    total_transp_act: float
+    total_transp_deficit: float
+    transp_deficit_pct: float
+    days_with_stress: int
+    days_severe_stress: int
+    yield_decrease_water_pct: float
+    yield_decrease_salinity_pct: float | None = None
+    yield_decrease_total_pct: float
+
+
+class IrrigationSummary(BaseModel):
+    """Seasonal irrigation performance metrics."""
+
+    total_irrigation: float
+    total_precip: float
+    total_etc_act: float
+    total_etc_pot: float
+    eta_etm_ratio: float
+    irrigation_efficiency: float
+    avg_pct_taw: float
+    avg_pct_raw: float
+
+
+class SimulationSummary(BaseModel):
+    """Complete seasonal summary."""
+
+    stress: StressSummary
+    irrigation: IrrigationSummary
+    n_days: int
+    start_date: datetime.date
+    end_date: datetime.date
 
 
 # ---------------------------------------------------------------------------
@@ -384,11 +612,13 @@ class SimulationResult(BaseModel):
             (if `yield_params` provided).
         yield_decrease_pct: Percentage yield decrease due to water stress [%]
             (if `yield_params` provided).
+        summary: Seasonal summary (stress, irrigation metrics).
     """
 
     daily_results: list[DailyResult]
     yield_act: float | None = None
     yield_decrease_pct: float | None = None
+    summary: SimulationSummary | None = None
 
     if TYPE_CHECKING:
         import pandas as pd

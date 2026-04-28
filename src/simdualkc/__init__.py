@@ -11,6 +11,7 @@ from simdualkc.data_loader import (
     load_crop_params,
     load_soil_params,
 )
+from simdualkc.eto import compute_eto, weather_to_climate_records
 from simdualkc.models import (
     ClimateRecord,
     CropParams,
@@ -20,6 +21,14 @@ from simdualkc.models import (
     SimulationConfig,
     SimulationResult,
     SoilParams,
+    WeatherRecord,
+)
+from simdualkc.reporting import (
+    compute_irrigation_summary,
+    compute_simulation_summary,
+    compute_stress_summary,
+    format_irrigation_opportunity_table,
+    format_yield_loss_table,
 )
 from simdualkc.simulation import run_simulation, to_dataframe
 
@@ -35,6 +44,16 @@ __all__ = [
     "SimulationConfig",
     "SimulationResult",
     "SoilParams",
+    "WeatherRecord",
+    # ETo calculator
+    "compute_eto",
+    "weather_to_climate_records",
+    # Reporting
+    "compute_irrigation_summary",
+    "compute_simulation_summary",
+    "compute_stress_summary",
+    "format_irrigation_opportunity_table",
+    "format_yield_loss_table",
     # Simulation entry-points
     "run_simulation",
     "to_dataframe",

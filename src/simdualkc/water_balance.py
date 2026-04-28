@@ -3,6 +3,8 @@
 All functions are stateless and operate on scalar floats.
 """
 
+from simdualkc.models import SoilLayer
+
 
 def compute_taw(theta_fc: float, theta_wp: float, zr: float) -> float:
     """Compute Total Available Water in the root zone.
@@ -18,6 +20,41 @@ def compute_taw(theta_fc: float, theta_wp: float, zr: float) -> float:
         TAW [mm].
     """
     return 1000.0 * (theta_fc - theta_wp) * zr
+
+
+def compute_taw_multilayer(layers: list[SoilLayer], zr: float) -> float:
+    """Compute Total Available Water by integrating layers up to root depth.
+
+    TAW = Σ[1000 × (θ_FC,i - θ_WP,i) × Δz_i,active]
+
+    Where Δz_i,active is the portion of layer i within the root zone.
+    As root depth Zr grows, TAW increases as more layers contribute.
+
+    Args:
+        layers: Soil layers ordered by bottom depth [m]. Each layer has
+            depth_m (bottom), theta_fc, theta_wp.
+        zr: Current root zone depth [m].
+
+    Returns:
+        TAW [mm].
+    """
+    if zr <= 0.0:
+        return 0.0
+
+    taw = 0.0
+    depth_top = 0.0
+
+    for layer in layers:
+        depth_bottom = layer.depth_m
+        if depth_top >= zr:
+            break
+        # Active thickness: portion of this layer within root zone
+        dz_active = min(depth_bottom, zr) - depth_top
+        if dz_active > 0:
+            taw += 1000.0 * (layer.theta_fc - layer.theta_wp) * dz_active
+        depth_top = depth_bottom
+
+    return taw
 
 
 def compute_raw(taw: float, p: float) -> float:

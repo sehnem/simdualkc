@@ -154,5 +154,9 @@ cython_debug/
 /ref
 /database_export
 
+# OpenCode (AI coding tool)
+.opencode/
+opencode.json
+
 # Generated example output
 examples/plots/
