@@ -1,16 +1,79 @@
 """Tests — conftest.py: shared fixtures for all test modules."""
 
 import datetime
+import json
+from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from simdualkc.models import (
     ClimateRecord,
     CropParams,
     InitialConditions,
+    IrrigationEvent,
+    IrrigationStrategy,
     SimulationConfig,
     SoilParams,
 )
+
+
+def load_cr_fixture(sim_id: int) -> tuple[SimulationConfig, pd.DataFrame]:
+    """Load a parametric-CR validation fixture pair.
+
+    Args:
+        sim_id: The SIMDualKc Simulacao_ID.
+
+    Returns:
+        ``(config, expected_df)`` where *expected_df* has columns matching
+        :class:`~simdualkc.models.DailyResult` field names.
+    """
+    fixture_dir = Path(__file__).parent / "fixtures" / "cr_parametric_validation"
+    config_path = fixture_dir / f"{sim_id}_config.json"
+    expected_path = fixture_dir / f"{sim_id}_expected.parquet"
+
+    with open(config_path) as f:
+        raw = json.load(f)
+
+    def _parse_date(d: str) -> datetime.date:
+        return datetime.date.fromisoformat(d)
+
+    soil = SoilParams(**raw["soil"])
+    crop = CropParams(**{**raw["crop"], "plant_date": _parse_date(raw["crop"]["plant_date"])})
+    climate = [
+        ClimateRecord(
+            date=_parse_date(r["date"]),
+            eto=r["eto"],
+            precip=r["precip"],
+            u2=r["u2"],
+            rh_min=r["rh_min"],
+            wt_depth_m=r.get("wt_depth_m"),
+        )
+        for r in raw["climate"]
+    ]
+    ic = InitialConditions(**raw["initial_conditions"])
+
+    config = SimulationConfig(
+        soil=soil,
+        crop=crop,
+        climate=climate,
+        initial_conditions=ic,
+        irrigation=[
+            IrrigationEvent(
+                date=_parse_date(e["date"]),
+                depth_mm=e["depth_mm"],
+                fw=e["fw"],
+            )
+            for e in raw["irrigation"]
+        ],
+        irrigation_strategy=IrrigationStrategy(**raw["irrigation_strategy"]),
+        fw_base=raw["fw_base"],
+        dp_method=raw["dp_method"],
+        cr_method=raw["cr_method"],
+    )
+
+    expected = pd.read_parquet(expected_path)
+    return config, expected
 
 
 @pytest.fixture()

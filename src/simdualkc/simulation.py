@@ -329,7 +329,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_pot_sum += kcb * eto
 
         # Capillary rise
-        cr = _compute_cr(config, dr, raw, climate, crop, day_of_sim)
+        cr = _compute_cr(config, dr, raw, climate, crop, day_of_sim, taw, zr, kcb, ke, eto)
 
         # Root-zone depletion update + deep percolation
         if config.dp_method == DPMethod.PARAMETRIC and soil.a_d and soil.b_d:
@@ -432,6 +432,11 @@ def _compute_cr(
     climate: ClimateRecord,
     crop: CropParams,
     day_of_sim: int,
+    taw: float,
+    zr: float,
+    kcb: float,
+    ke: float,
+    eto: float,
 ) -> float:
     """Dispatch capillary rise computation based on configured method."""
     if config.cr_method == CRMethod.NONE:
@@ -461,9 +466,14 @@ def _compute_cr(
             assert soil.cr_b3 is not None
             assert soil.cr_a4 is not None
             assert soil.cr_b4 is not None
+            dw = max(0.0, wt_depth_m - zr)
+            wa = taw - dr
+            etm = kcb * eto
             return compute_cr_parametric_complete(
-                z_wt=wt_depth_m,
+                dw=dw,
+                wa=wa,
                 lai=lai,
+                etm=etm,
                 a1=soil.cr_a1,
                 b1=soil.cr_b1,
                 a2=soil.cr_a2,

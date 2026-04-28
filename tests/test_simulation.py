@@ -224,18 +224,31 @@ class TestParametricCrIntegration:
             cr_a4=4.60,
             cr_b4=-0.65,
         )
-        ic = InitialConditions(dr0=50.0, dei0=5.0, dep0=5.0)
+        # Use a high-Kcb crop planted on the first climate date so that day_of_sim=1
+        # already has large Kcb and non-zero LAI, giving material CR.
+        mid_crop = crop.model_copy(
+            update={
+                "plant_date": base,
+                "kcb_ini": 1.0,
+                "kcb_mid": 1.0,
+                "kcb_end": 1.0,
+                "stage_lengths": [1, 1, 50, 1],
+                "lai_dates": [base],
+                "lai_values": [2.0],
+            }
+        )
+        ic = InitialConditions(dr0=20.0, dei0=5.0, dep0=5.0)
 
         config_cr = SimulationConfig(
             soil=soil_cr,
-            crop=crop,
+            crop=mid_crop,
             climate=climate,
             initial_conditions=ic,
             cr_method=CRMethod.PARAMETRIC,
         )
         config_none = SimulationConfig(
             soil=soil_cr.model_copy(update={"cr_a1": None}),  # drop CR coefficients
-            crop=crop,
+            crop=mid_crop,
             climate=climate,
             initial_conditions=ic,
             cr_method=CRMethod.NONE,

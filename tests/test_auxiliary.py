@@ -136,8 +136,10 @@ class TestComputeCrParametricComplete:
 
     def test_cr_positive_for_dengkou_coefficients(self) -> None:
         cr = compute_cr_parametric_complete(
-            z_wt=1.0,
+            dw=1.0,
+            wa=50.0,
             lai=2.0,
+            etm=3.0,
             a1=380.0,
             b1=-0.17,
             a2=300.0,
@@ -149,24 +151,27 @@ class TestComputeCrParametricComplete:
         )
         assert cr > 0.0
 
-    def test_cr_decreases_when_z_wt_increases(self) -> None:
-        # Synthetic coefficients that guarantee monotonic decrease with depth
+    def test_cr_decreases_when_dw_increases(self) -> None:
+        # In the Dw > Dwc branch CRmax = a4*Dw^b4 (b4<0) decreases with depth.
         coeffs = {
             "a1": 380.0,
             "b1": -0.17,
             "a2": 300.0,
             "b2": -0.27,
-            "a3": 1.3,
-            "b3": 0.5,
-            "a4": 0.0,
-            "b4": 0.0,
+            "a3": -1.3,
+            "b3": 6.6,
+            "a4": 4.60,
+            "b4": -0.65,
         }
-        cr_low = compute_cr_parametric_complete(z_wt=1.0, lai=2.0, **coeffs)
-        cr_high = compute_cr_parametric_complete(z_wt=2.0, lai=2.0, **coeffs)
+        # ETm > 4 => Dwc = 1.4, so Dw=2.0 and Dw=3.0 both fall in the a4-branch.
+        # Wa=100 is well below Ws for both depths, so moisture reduction is not active.
+        cr_low = compute_cr_parametric_complete(dw=2.0, wa=100.0, lai=2.0, etm=5.0, **coeffs)
+        cr_high = compute_cr_parametric_complete(dw=3.0, wa=100.0, lai=2.0, etm=5.0, **coeffs)
         assert cr_high < cr_low
 
-    def test_cr_increases_when_lai_decreases(self) -> None:
-        # Synthetic coefficients that guarantee monotonic increase when LAI drops
+    def test_cr_increases_when_lai_increases(self) -> None:
+        # k = 1-exp(-0.6*LAI) increases with LAI, so CRmax increases with LAI
+        # when Dw <= Dwc.
         coeffs = {
             "a1": 380.0,
             "b1": -0.17,
@@ -177,11 +182,12 @@ class TestComputeCrParametricComplete:
             "a4": 0.0,
             "b4": 0.0,
         }
-        cr_high_lai = compute_cr_parametric_complete(z_wt=1.0, lai=4.0, **coeffs)
-        cr_low_lai = compute_cr_parametric_complete(z_wt=1.0, lai=1.0, **coeffs)
-        assert cr_low_lai > cr_high_lai
+        cr_low_lai = compute_cr_parametric_complete(dw=1.0, wa=50.0, lai=1.0, etm=3.0, **coeffs)
+        cr_high_lai = compute_cr_parametric_complete(dw=1.0, wa=50.0, lai=4.0, etm=3.0, **coeffs)
+        assert cr_high_lai > cr_low_lai
 
-    def test_cr_zero_when_z_wt_non_positive(self) -> None:
+    def test_cr_zero_when_wa_exceeds_wc(self) -> None:
+        # When soil water storage exceeds the critical value, no capillary rise.
         coeffs = {
             "a1": 380.0,
             "b1": -0.17,
@@ -192,8 +198,10 @@ class TestComputeCrParametricComplete:
             "a4": 0.0,
             "b4": 0.0,
         }
-        assert compute_cr_parametric_complete(z_wt=0.0, lai=2.0, **coeffs) == pytest.approx(0.0)
-        assert compute_cr_parametric_complete(z_wt=-1.0, lai=2.0, **coeffs) == pytest.approx(0.0)
+        # Dw=1.0 => Wc = 380, Ws = 300.  Wa=500 > Wc => CR should be 0.
+        assert compute_cr_parametric_complete(
+            dw=1.0, wa=500.0, lai=2.0, etm=3.0, **coeffs
+        ) == pytest.approx(0.0)
 
 
 class TestComputeCrParametric:

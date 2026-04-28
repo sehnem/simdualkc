@@ -100,7 +100,7 @@ class SoilParams(BaseModel):
 
     theta_fc: float = Field(gt=0.0, lt=1.0, description="Field capacity [m³/m³]")
     theta_wp: float = Field(gt=0.0, lt=1.0, description="Wilting point [m³/m³]")
-    layers: list[SoilLayer] | None = Field(default=None, max_length=5)
+    layers: list[SoilLayer] | None = Field(default=None, max_length=10)
     ze: float = Field(default=0.10, gt=0.0, le=0.30, description="Evaporative layer depth [m]")
     rew: float = Field(gt=0.0, description="Readily evaporable water [mm]")
     tew: float = Field(gt=0.0, description="Total evaporable water [mm]")
@@ -601,7 +601,7 @@ class InitialConditions(BaseModel):
         dep0: Surface evaporative layer depletion — precipitation-only fraction [mm].
     """
 
-    dr0: float = Field(ge=0.0, description="Initial root-zone depletion [mm]")
+    dr0: float = Field(description="Initial root-zone depletion [mm]")
     dei0: float = Field(ge=0.0, description="Initial surface depletion (irrigated) [mm]")
     dep0: float = Field(ge=0.0, description="Initial surface depletion (precip-only) [mm]")
 

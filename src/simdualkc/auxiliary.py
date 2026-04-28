@@ -166,7 +166,7 @@ def compute_cr_parametric(
     must be supplied by the caller from lookup tables.
 
     Args:
-        z_wt: Distance from root zone base to water table [m].
+        z_wt: Water table depth from surface [m].
         lai: Leaf area index [m²/m²].
         a_c: Empirical coefficient *a* [—].
         b_c: Empirical exponent for depth [—].
@@ -182,8 +182,10 @@ def compute_cr_parametric(
 
 
 def compute_cr_parametric_complete(
-    z_wt: float,
+    dw: float,
+    wa: float,
     lai: float,
+    etm: float,
     a1: float,
     b1: float,
     a2: float,
@@ -195,23 +197,57 @@ def compute_cr_parametric_complete(
 ) -> float:
     """Compute capillary rise via Liu et al. (2006) full parametric model.
 
-    CR = (a1×z_wt^b1 + a2×z_wt^b2) × exp(-(a3×z_wt^b3 + a4×z_wt^b4)×LAI)
+    Implementation follows the ``cal_capillaryRise`` function from the
+    R package *simET* (Liu et al. 2006, Agric. Water Manage. 84:27-40).
 
-    Parameters depend on soil texture (tutorial Slide 57).
+    Steps:
+      1. Wc = a1 * Dw^b1                     (critical soil water storage)
+      2. Ws = a2 * Dw^b2  (Dw <= 3 m)        (steady soil water storage)
+      3. Dwc = a3 * ETm + b3   (ETm <= 4)    (critical groundwater depth)
+      4. k = 1 - exp(-0.6 * LAI)  (ETm <= 4) (transpiration factor)
+      5. CRmax = k * ETm  if Dw <= Dwc else a4 * Dw^b4
+      6. CR = CRmax                     if Wa < Ws
+              CRmax * (Wc-Wa)/(Wc-Ws)   if Ws <= Wa <= Wc
+              0                         if Wa > Wc
 
     Args:
-        z_wt: Water table depth from surface [m].
+        dw: Groundwater depth below root zone [m] (max(0, wt_depth_m - zr)).
+        wa: Actual soil water storage in root zone [mm] (taw - dr).
         lai: Leaf area index [m²/m²].
+        etm: Potential crop transpiration [mm/day] (Kcb * ETo).
         a1, b1, a2, b2, a3, b3, a4, b4: Soil texture coefficients.
 
     Returns:
         Capillary rise [mm/day].
     """
-    if z_wt <= 0.0:
-        return 0.0
-    depth_term = a1 * (z_wt**b1) + a2 * (z_wt**b2)
-    lai_exponent = (a3 * (z_wt**b3) + a4 * (z_wt**b4)) * lai
-    return depth_term * math.exp(-lai_exponent)
+    # 1. Critical soil water storage
+    wc = float("inf") if dw <= 0.0 else a1 * (dw**b1)
+
+    # 2. Steady soil water storage
+    if dw <= 0.0:
+        ws = float("inf")
+    elif dw <= 3.0:
+        ws = a2 * (dw**b2)
+    else:
+        ws = 240.0
+
+    # 3. Critical groundwater depth
+    dwc = a3 * etm + b3 if etm <= 4.0 else 1.4
+
+    # 4. Transpiration factor
+    k = 1.0 - math.exp(-0.6 * lai) if etm <= 4.0 else 3.8 / etm
+
+    # 5. Potential capillary flux
+    cr_max = k * etm if dw <= dwc else a4 * (dw**b4)
+
+    # 6. Actual capillary rise
+    if wa < ws:
+        return cr_max
+    if wa <= wc:
+        if wc == ws:
+            return cr_max
+        return cr_max * ((wc - wa) / (wc - ws))
+    return 0.0
 
 
 def get_crop_list() -> pd.DataFrame:

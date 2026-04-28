@@ -160,3 +160,6 @@ opencode.json
 
 # Generated example output
 examples/plots/
+
+# CR validation analysis output (plots + generated docs)
+docs/cr_validation_findings/

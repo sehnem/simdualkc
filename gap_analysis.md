@@ -33,6 +33,7 @@ This document tracks the implementation status of features from the official SIM
 - **[DONE] Groundwater**:
     - Constant CR: `compute_cr_constant` in `auxiliary.py` — fully implemented.
     - Parametric CR (Liu et al., 2006): `compute_cr_parametric_complete` in `auxiliary.py` — fully implemented with 8-coefficient and 4-coefficient simplified forms, `SimulationConfig` validation, water table depth interpolation helper, reference data loader.
+    - **[VALIDATED]** Line-by-line comparison against `simET` R package v1.0.3 (`cal_capillaryRise` by Liu/Pereira, CRAN) confirms the formula matches exactly. **Fallow crops** (Sim 27–32) validate perfectly against `T_Resultados`. **Active crops** show systematic deviations from `T_Resultados` (early-season CR=0 vs. small positive ~0.05–0.15; mid-season with shallow water table / wet soil: CR=0 vs. ~3.8 capped). These are attributed to undocumented guard conditions in the original Access VB6 software (not accessible — only compiled binaries); the R package formula is adopted as ground truth.
     - Water table depth: `wt_depth_m` on `ClimateRecord` — fully integrated into simulation loop via `_compute_cr` dispatcher.
     - Deep percolation parametric: `compute_dp_parametric` in `auxiliary.py` — implemented, needs validation.
 
@@ -70,7 +71,8 @@ This document tracks the implementation status of features from the official SIM
 - Forage multi-cut logic (cutting cycles, root depth reset, Kcb sawtooth, Dr cap on cut day)
 
 ### Short-term (next)
-- Full CR parametric validation against `T_Resultados`
+- ~~Full CR parametric validation against `T_Resultados`~~ **[DONE]**
+  - Fallow crops validate perfectly. Active crops show known discrepancies due to undocumented original-software guards (see parametric CR section above). R package formula adopted as ground truth.
 
 ### Mid-term
 - Climate data validation and gap padding
