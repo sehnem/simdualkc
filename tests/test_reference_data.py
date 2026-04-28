@@ -2,7 +2,7 @@
 
 import pytest
 
-from simdualkc import load_crop_params, load_soil_params
+from simdualkc import load_capillary_rise_params, load_crop_params, load_soil_params
 from simdualkc.models import CropParams, SoilParams
 
 
@@ -39,3 +39,13 @@ def test_list_data_assets() -> None:
 
     assert "MilhoAlvalade2005_IA" in crops
     assert "Clay" in soils
+
+
+def test_load_capillary_rise_params() -> None:
+    """Verify load_capillary_rise_params returns expected coefficients for a known ID."""
+    params = load_capillary_rise_params(18369)
+    assert isinstance(params, dict)
+    assert params["a1"] == pytest.approx(380.0)
+    assert params["b1"] == pytest.approx(-0.17)
+    assert params["parametro_a"] == pytest.approx(410.0)
+    assert params["parametro_b"] == pytest.approx(-0.0173)

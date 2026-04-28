@@ -94,3 +94,37 @@ def load_soil_params(name: str) -> SoilParams:
         ze=0.15,  # Default for most studies unless specified
         cn2=75.0,  # Default, T_Solo doesn't seem to have CN2 directly (it's in T_Runoff)
     )
+
+
+def load_capillary_rise_params(capillary_id: int) -> dict[str, float]:
+    """Load capillary rise parametric coefficients by Capilary_ID.
+
+    Reads from ``database_export/T_asc_capilar.parquet`` and returns
+    the full 8-coefficient set (``a1, b1, a2, b2, a3, b3, a4, b4``)
+    and the simplified 2-coefficient set (``parametro_a, parametro_b``)
+    when present.
+
+    Args:
+        capillary_id: The unique Capilary_ID from the reference database.
+
+    Returns:
+        Dictionary mapping coefficient names to float values.
+
+    Raises:
+        ValueError: If the ID is not found.
+    """
+    data_path = Path(__file__).parent.parent.parent / "database_export" / "T_asc_capilar.parquet"
+    df = pd.read_parquet(data_path)
+    row = df[df["Capilary_ID"] == capillary_id]
+    if row.empty:
+        raise ValueError(f"Capillary rise ID {capillary_id} not found in database.")
+
+    data = row.iloc[0].to_dict()
+    result: dict[str, float] = {}
+    for key in ["a1", "b1", "a2", "b2", "a3", "b3", "a4", "b4"]:
+        if key in data and not pd.isna(data[key]):
+            result[key] = float(data[key])
+    for key in ["parametro_a", "parametro_b"]:
+        if key in data and not pd.isna(data[key]):
+            result[key] = float(data[key])
+    return result

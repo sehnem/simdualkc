@@ -5,13 +5,21 @@ import datetime
 import pytest
 
 from simdualkc.irrigation import (
+    apply_delivery_constraints,
     compute_irrigation_depth,
+    get_mad_for_day,
+    get_min_interval_for_date,
+    get_target_pct_taw_for_day,
+    resolve_stage_fixed_depth,
     should_trigger_irrigation,
 )
 from simdualkc.models import (
     ClimateRecord,
     CropParams,
+    DeficitIrrigationStrategy,
+    DeliveryConstraints,
     InitialConditions,
+    IrrigationIntervalPeriod,
     IrrigationStrategy,
     MADThresholdStrategy,
     SimulationConfig,
@@ -151,3 +159,221 @@ class TestMADSimulation:
         # Some days should have non-zero irrigation
         irrig_totals = [r.irrig for r in result.daily_results]
         assert sum(irrig_totals) > 0
+
+
+class TestGetMinIntervalForDate:
+    def test_none_schedule_returns_fallback(self) -> None:
+        date = datetime.date(2024, 6, 15)
+        assert get_min_interval_for_date(date, None, 5) == 5
+
+    def test_date_inside_period(self) -> None:
+        period = IrrigationIntervalPeriod(
+            start_date=datetime.date(2024, 6, 1),
+            end_date=datetime.date(2024, 6, 30),
+            min_interval_days=10,
+        )
+        date = datetime.date(2024, 6, 15)
+        assert get_min_interval_for_date(date, [period], 5) == 10
+
+    def test_date_outside_period_returns_fallback(self) -> None:
+        period = IrrigationIntervalPeriod(
+            start_date=datetime.date(2024, 6, 1),
+            end_date=datetime.date(2024, 6, 30),
+            min_interval_days=10,
+        )
+        date = datetime.date(2024, 7, 15)
+        assert get_min_interval_for_date(date, [period], 5) == 5
+
+    def test_boundary_start_date(self) -> None:
+        period = IrrigationIntervalPeriod(
+            start_date=datetime.date(2024, 6, 1),
+            end_date=datetime.date(2024, 6, 30),
+            min_interval_days=10,
+        )
+        date = datetime.date(2024, 6, 1)
+        assert get_min_interval_for_date(date, [period], 5) == 10
+
+    def test_boundary_end_date(self) -> None:
+        period = IrrigationIntervalPeriod(
+            start_date=datetime.date(2024, 6, 1),
+            end_date=datetime.date(2024, 6, 30),
+            min_interval_days=10,
+        )
+        date = datetime.date(2024, 6, 30)
+        assert get_min_interval_for_date(date, [period], 5) == 10
+
+    def test_first_match_wins(self) -> None:
+        period1 = IrrigationIntervalPeriod(
+            start_date=datetime.date(2024, 6, 1),
+            end_date=datetime.date(2024, 6, 30),
+            min_interval_days=10,
+        )
+        period2 = IrrigationIntervalPeriod(
+            start_date=datetime.date(2024, 6, 15),
+            end_date=datetime.date(2024, 7, 15),
+            min_interval_days=20,
+        )
+        date = datetime.date(2024, 6, 20)
+        assert get_min_interval_for_date(date, [period1, period2], 5) == 10
+
+
+class TestGetTargetPctTawForDay:
+    @staticmethod
+    def _crop() -> CropParams:
+        return CropParams(
+            kcb_ini=0.15,
+            kcb_mid=1.10,
+            kcb_end=0.35,
+            stage_lengths=[15, 30, 60, 25],
+            plant_date=datetime.date(2024, 4, 1),
+            zr_max=1.0,
+            h_max=2.0,
+            p_tab=0.55,
+            fc_max=0.9,
+        )
+
+    def test_mad_without_delivery(self) -> None:
+        crop = self._crop()
+        strategy = MADThresholdStrategy(mad_fraction=0.5, target_pct_taw=80.0)
+        assert get_target_pct_taw_for_day(30, crop, strategy) == 80.0
+
+    def test_deficit_with_stage_target_hit(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(
+            stage_mad={"ini": 0.5, "dev": 0.5, "mid": 0.5, "late": 0.5},
+            target_pct_taw=100.0,
+            delivery=DeliveryConstraints(stage_target_pct_taw={"mid": 80.0}),
+        )
+        # day 60 falls in the mid stage (46–105)
+        assert get_target_pct_taw_for_day(60, crop, strategy) == 80.0
+
+    def test_deficit_with_stage_target_miss(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(
+            stage_mad={"ini": 0.5, "dev": 0.5, "mid": 0.5, "late": 0.5},
+            target_pct_taw=100.0,
+            delivery=DeliveryConstraints(stage_target_pct_taw={"mid": 80.0}),
+        )
+        # day 10 falls in the ini stage (1–15)
+        assert get_target_pct_taw_for_day(10, crop, strategy) == 100.0
+
+    def test_none_delivery(self) -> None:
+        crop = self._crop()
+        strategy = MADThresholdStrategy(mad_fraction=0.5, target_pct_taw=70.0)
+        assert get_target_pct_taw_for_day(60, crop, strategy) == 70.0
+
+
+class TestGetMadForDay:
+    @staticmethod
+    def _crop() -> CropParams:
+        return CropParams(
+            kcb_ini=0.15,
+            kcb_mid=1.10,
+            kcb_end=0.35,
+            stage_lengths=[25, 35, 45, 25],
+            plant_date=datetime.date(2024, 4, 1),
+            zr_max=1.0,
+            h_max=2.0,
+            p_tab=0.55,
+            fc_max=0.9,
+        )
+
+    def test_mad_strategy_returns_constant(self) -> None:
+        crop = self._crop()
+        strategy = MADThresholdStrategy(mad_fraction=0.55)
+        assert get_mad_for_day(10, crop, strategy) == 0.55
+
+    def test_deficit_strategy_ini_stage(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(
+            stage_mad={"ini": 0.50, "dev": 0.60, "mid": 0.40, "late": 0.55}
+        )
+        assert get_mad_for_day(10, crop, strategy) == 0.50
+
+    def test_deficit_strategy_dev_stage(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(
+            stage_mad={"ini": 0.50, "dev": 0.60, "mid": 0.40, "late": 0.55}
+        )
+        assert get_mad_for_day(30, crop, strategy) == 0.60
+
+    def test_deficit_strategy_mid_stage(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(
+            stage_mad={"ini": 0.50, "dev": 0.60, "mid": 0.40, "late": 0.55}
+        )
+        assert get_mad_for_day(65, crop, strategy) == 0.40
+
+    def test_deficit_strategy_late_stage(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(
+            stage_mad={"ini": 0.50, "dev": 0.60, "mid": 0.40, "late": 0.55}
+        )
+        assert get_mad_for_day(120, crop, strategy) == 0.55
+
+    def test_deficit_missing_key_fallback(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(stage_mad={"mid": 0.40})
+        assert get_mad_for_day(10, crop, strategy) == 0.40
+
+    def test_deficit_missing_key_and_mid_fallback(self) -> None:
+        crop = self._crop()
+        strategy = DeficitIrrigationStrategy(stage_mad={})
+        assert get_mad_for_day(10, crop, strategy) == 0.5
+
+
+class TestResolveStageFixedDepth:
+    def test_none_delivery(self) -> None:
+        assert resolve_stage_fixed_depth(3, None) is None
+
+    def test_fixed_depth_mm_set(self) -> None:
+        delivery = DeliveryConstraints(fixed_depth_mm=30.0)
+        assert resolve_stage_fixed_depth(1, delivery) == 30.0
+        assert resolve_stage_fixed_depth(3, delivery) == 30.0
+
+    def test_stage_fixed_depth_hit(self) -> None:
+        delivery = DeliveryConstraints(stage_fixed_depth_mm={"mid": 25.0})
+        assert resolve_stage_fixed_depth(3, delivery) == 25.0
+
+    def test_stage_fixed_depth_miss(self) -> None:
+        delivery = DeliveryConstraints(stage_fixed_depth_mm={"mid": 25.0})
+        assert resolve_stage_fixed_depth(1, delivery) is None
+
+    def test_fixed_depth_overrides_stage(self) -> None:
+        delivery = DeliveryConstraints(
+            fixed_depth_mm=30.0,
+            stage_fixed_depth_mm={"mid": 25.0},
+        )
+        assert resolve_stage_fixed_depth(3, delivery) == 30.0
+
+    def test_invalid_stage_falls_back_to_mid(self) -> None:
+        delivery = DeliveryConstraints(stage_fixed_depth_mm={"mid": 20.0})
+        assert resolve_stage_fixed_depth(0, delivery) == 20.0
+
+    def test_invalid_stage_five_falls_back_to_mid(self) -> None:
+        delivery = DeliveryConstraints(stage_fixed_depth_mm={"mid": 20.0})
+        assert resolve_stage_fixed_depth(5, delivery) == 20.0
+
+
+class TestApplyDeliveryConstraints:
+    def test_no_delivery_returns_original(self) -> None:
+        assert apply_delivery_constraints(50.0, 3, None) == 50.0
+
+    def test_max_depth_cap(self) -> None:
+        delivery = DeliveryConstraints(max_depth_mm=20.0)
+        assert apply_delivery_constraints(50.0, 3, delivery) == 20.0
+
+    def test_fixed_depth_override(self) -> None:
+        delivery = DeliveryConstraints(fixed_depth_mm=30.0)
+        assert apply_delivery_constraints(50.0, 3, delivery) == 30.0
+
+    def test_stage_fixed_depth_override(self) -> None:
+        delivery = DeliveryConstraints(stage_fixed_depth_mm={"mid": 25.0})
+        assert apply_delivery_constraints(50.0, 3, delivery) == 25.0
+
+    def test_max_depth_applied_after_fixed(self) -> None:
+        delivery = DeliveryConstraints(fixed_depth_mm=40.0, max_depth_mm=20.0)
+        assert apply_delivery_constraints(50.0, 3, delivery) == 20.0
+
+    def test_negative_depth_clamped_to_zero(self) -> None:
+        assert apply_delivery_constraints(-5.0, 3, None) == 0.0

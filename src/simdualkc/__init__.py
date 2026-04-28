@@ -8,6 +8,7 @@ from importlib.metadata import version
 from simdualkc.data_loader import (
     list_crops,
     list_soils,
+    load_capillary_rise_params,
     load_crop_params,
     load_soil_params,
 )
@@ -60,6 +61,7 @@ __all__ = [
     # Data loaders
     "list_crops",
     "list_soils",
+    "load_capillary_rise_params",
     "load_crop_params",
     "load_soil_params",
 ]

@@ -87,6 +87,7 @@ The library must support these modes, controlled by `SimulationConfig`:
 | Orchard + groundcover | `SimulationConfig.groundcover: GroundcoverParams` |
 | Salinity stress | `SimulationConfig.salinity: SalinityParams` |
 | Yield estimation | `SimulationConfig.yield_params: YieldParams` |
+| Forage multi-cut | `CropParams.is_forage=True, CropParams.forage_params: ForageParams` |
 
 Multi-scenario comparison: call `run_simulation` once per config variant, then compare `SimulationResult` objects.
 
@@ -99,23 +100,23 @@ Multi-scenario comparison: call `run_simulation` once per config variant, then c
 - FAO-56 Penman-Monteith ETo from raw weather
 - LAI-based fraction cover
 - Automated irrigation: MAD threshold, deficit strategies, harvest-stop, minimum interval
+- Irrigation delivery constraints: rotational interval schedules, fixed/stage-fixed depths, max depth per event, per-stage refill targets, farm pond with refill events and capacity limits
 - Groundcover/orchard (active inter-row vegetation)
 - Yield summaries (Stewart model)
 - Salinity stress (Mass-Hoffman)
 - Mulch effects
 - Seasonal reporting: stress summary, irrigation opportunity metrics
+- Full parametric capillary rise (Liu et al. 2006): 8-coefficient and 4-coefficient simplified forms, water table depth interpolation, reference data loader
+- Forage crops with multiple cuts: cutting cycles, root depth reset between cuts, varying Kcb/fc/h/zr per cycle, sawtooth Kcb pattern, Dr cap on cut day
 
 ### Missing (see `gap_analysis.md` for full detail)
 
 Priority order:
 
-1. **Forage crops with multiple cuts** — cutting cycles, root depth reset between cuts, varying Kcb after cut
-2. **Irrigation delivery constraints** — rotational delivery schedules, minimum irrigation intervals beyond simple `min_interval`
-3. **Full parametric capillary rise** — `compute_cr_parametric` is a stub; needs water table depth input integrated into `ClimateRecord` and the simulation loop
-4. **Intercropping** — overlapping or contiguous crops sharing the same soil profile
-5. **Climate data validation** — Jan 1 → Dec 31 completeness check, auto-padding with mean values
-6. **Pedotransfer functions** — soil texture (sand/clay %) → θ_fc, θ_wp, TEW, REW estimation
-7. **Regional/batch simulation** — multi-field or multi-location runner (pure function design already supports this; needs a thin orchestration layer)
+1. **Intercropping** — overlapping or contiguous crops sharing the same soil profile
+2. **Climate data validation** — Jan 1 → Dec 31 completeness check, auto-padding with mean values
+3. **Pedotransfer functions** — soil texture (sand/clay %) → θ_fc, θ_wp, TEW, REW estimation
+4. **Regional/batch simulation** — multi-field or multi-location runner (pure function design already supports this; needs a thin orchestration layer)
 
 ---
 
@@ -170,8 +171,7 @@ Real multi-station historical weather series — useful for ETo validation and c
 ## Roadmap
 
 **Short term** (next features to implement):
-- Full CR parametric (water table depth in `ClimateRecord`)
-- Delivery constraints in `IrrigationStrategy`
+- Full CR parametric validation against `T_Resultados`
 
 **Mid term**:
 - Intercropping support

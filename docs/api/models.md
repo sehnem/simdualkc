@@ -10,6 +10,10 @@ All Pydantic domain models for input and output.
 ::: simdualkc.models.ClimateRecord
 ::: simdualkc.models.WeatherRecord
 ::: simdualkc.models.IrrigationEvent
+::: simdualkc.models.IrrigationIntervalPeriod
+::: simdualkc.models.FarmPondSupply
+::: simdualkc.models.FarmPondConstraint
+::: simdualkc.models.DeliveryConstraints
 ::: simdualkc.models.MADThresholdStrategy
 ::: simdualkc.models.DeficitIrrigationStrategy
 ::: simdualkc.models.IrrigationStrategy

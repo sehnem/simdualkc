@@ -1,5 +1,6 @@
 """Unit tests for simdualkc.auxiliary."""
 
+import datetime
 from itertools import pairwise
 
 import pytest
@@ -8,10 +9,14 @@ from simdualkc.auxiliary import (
     adjust_cn_for_moisture,
     cn_from_amc,
     compute_cr_constant,
+    compute_cr_parametric,
+    compute_cr_parametric_complete,
     compute_dp_parametric,
     compute_dp_simple,
     compute_runoff_cn,
+    interpolate_water_table_depth,
 )
+from simdualkc.models import ClimateRecord
 
 
 class TestCnFromAmc:
@@ -124,3 +129,154 @@ class TestComputeCrConstant:
         cr_low = compute_cr_constant(gmax=3.0, dr=10.0, raw=50.0)
         cr_high = compute_cr_constant(gmax=3.0, dr=40.0, raw=50.0)
         assert cr_high > cr_low
+
+
+class TestComputeCrParametricComplete:
+    """Tests for the 8-parameter full parametric CR model (Liu et al. 2006)."""
+
+    def test_cr_positive_for_dengkou_coefficients(self) -> None:
+        cr = compute_cr_parametric_complete(
+            z_wt=1.0,
+            lai=2.0,
+            a1=380.0,
+            b1=-0.17,
+            a2=300.0,
+            b2=-0.27,
+            a3=-1.3,
+            b3=6.6,
+            a4=4.60,
+            b4=-0.65,
+        )
+        assert cr > 0.0
+
+    def test_cr_decreases_when_z_wt_increases(self) -> None:
+        # Synthetic coefficients that guarantee monotonic decrease with depth
+        coeffs = {
+            "a1": 380.0,
+            "b1": -0.17,
+            "a2": 300.0,
+            "b2": -0.27,
+            "a3": 1.3,
+            "b3": 0.5,
+            "a4": 0.0,
+            "b4": 0.0,
+        }
+        cr_low = compute_cr_parametric_complete(z_wt=1.0, lai=2.0, **coeffs)
+        cr_high = compute_cr_parametric_complete(z_wt=2.0, lai=2.0, **coeffs)
+        assert cr_high < cr_low
+
+    def test_cr_increases_when_lai_decreases(self) -> None:
+        # Synthetic coefficients that guarantee monotonic increase when LAI drops
+        coeffs = {
+            "a1": 380.0,
+            "b1": -0.17,
+            "a2": 300.0,
+            "b2": -0.27,
+            "a3": 1.3,
+            "b3": 0.5,
+            "a4": 0.0,
+            "b4": 0.0,
+        }
+        cr_high_lai = compute_cr_parametric_complete(z_wt=1.0, lai=4.0, **coeffs)
+        cr_low_lai = compute_cr_parametric_complete(z_wt=1.0, lai=1.0, **coeffs)
+        assert cr_low_lai > cr_high_lai
+
+    def test_cr_zero_when_z_wt_non_positive(self) -> None:
+        coeffs = {
+            "a1": 380.0,
+            "b1": -0.17,
+            "a2": 300.0,
+            "b2": -0.27,
+            "a3": 1.3,
+            "b3": 0.5,
+            "a4": 0.0,
+            "b4": 0.0,
+        }
+        assert compute_cr_parametric_complete(z_wt=0.0, lai=2.0, **coeffs) == pytest.approx(0.0)
+        assert compute_cr_parametric_complete(z_wt=-1.0, lai=2.0, **coeffs) == pytest.approx(0.0)
+
+
+class TestComputeCrParametric:
+    """Tests for the 4-parameter simplified parametric CR model."""
+
+    def test_cr_positive_for_simplified_coefficients(self) -> None:
+        cr = compute_cr_parametric(z_wt=1.0, lai=2.0, a_c=410.0, b_c=-0.0173, c_c=0.0, d_c=1.0)
+        assert cr > 0.0
+
+    def test_cr_decreases_when_z_wt_increases(self) -> None:
+        cr_low = compute_cr_parametric(z_wt=1.0, lai=2.0, a_c=410.0, b_c=-0.0173, c_c=0.0, d_c=1.0)
+        cr_high = compute_cr_parametric(
+            z_wt=3.0, lai=2.0, a_c=410.0, b_c=-0.0173, c_c=0.0, d_c=1.0
+        )
+        assert cr_high < cr_low
+
+    def test_cr_increases_when_lai_decreases(self) -> None:
+        cr_high_lai = compute_cr_parametric(
+            z_wt=1.0, lai=4.0, a_c=410.0, b_c=-0.0173, c_c=0.01, d_c=1.0
+        )
+        cr_low_lai = compute_cr_parametric(
+            z_wt=1.0, lai=1.0, a_c=410.0, b_c=-0.0173, c_c=0.01, d_c=1.0
+        )
+        assert cr_low_lai > cr_high_lai
+
+    def test_cr_zero_when_z_wt_non_positive(self) -> None:
+        assert compute_cr_parametric(
+            z_wt=0.0, lai=2.0, a_c=410.0, b_c=-0.0173, c_c=0.0, d_c=1.0
+        ) == pytest.approx(0.0)
+        assert compute_cr_parametric(
+            z_wt=-1.0, lai=2.0, a_c=410.0, b_c=-0.0173, c_c=0.0, d_c=1.0
+        ) == pytest.approx(0.0)
+
+
+class TestInterpolateWaterTableDepth:
+    def test_interpolates_linearly_between_dates(self) -> None:
+        base = datetime.date(2024, 1, 1)
+        climate = [
+            ClimateRecord(
+                date=base + datetime.timedelta(days=i), eto=5.0, precip=0.0, u2=2.0, rh_min=45.0
+            )
+            for i in range(5)
+        ]
+        wt_dates = [base, base + datetime.timedelta(days=4)]
+        wt_depths = [1.0, 3.0]
+        result = interpolate_water_table_depth(climate, wt_dates, wt_depths)
+        assert result[0].wt_depth_m == pytest.approx(1.0)
+        assert result[2].wt_depth_m == pytest.approx(2.0)
+        assert result[4].wt_depth_m == pytest.approx(3.0)
+
+    def test_holds_first_value_before_range(self) -> None:
+        base = datetime.date(2024, 1, 1)
+        climate = [
+            ClimateRecord(
+                date=base + datetime.timedelta(days=i), eto=5.0, precip=0.0, u2=2.0, rh_min=45.0
+            )
+            for i in range(3)
+        ]
+        wt_dates = [base + datetime.timedelta(days=1), base + datetime.timedelta(days=2)]
+        wt_depths = [2.0, 4.0]
+        result = interpolate_water_table_depth(climate, wt_dates, wt_depths)
+        assert result[0].wt_depth_m == pytest.approx(2.0)
+
+    def test_holds_last_value_after_range(self) -> None:
+        base = datetime.date(2024, 1, 1)
+        climate = [
+            ClimateRecord(
+                date=base + datetime.timedelta(days=i), eto=5.0, precip=0.0, u2=2.0, rh_min=45.0
+            )
+            for i in range(3)
+        ]
+        wt_dates = [base, base + datetime.timedelta(days=1)]
+        wt_depths = [1.0, 2.0]
+        result = interpolate_water_table_depth(climate, wt_dates, wt_depths)
+        assert result[2].wt_depth_m == pytest.approx(2.0)
+
+    def test_raises_on_mismatched_lengths(self) -> None:
+        with pytest.raises(ValueError, match="wt_dates and wt_depths"):
+            interpolate_water_table_depth([], [datetime.date(2024, 1, 1)], [1.0, 2.0])
+
+    def test_returns_new_objects(self) -> None:
+        base = datetime.date(2024, 1, 1)
+        climate = [ClimateRecord(date=base, eto=5.0, precip=0.0, u2=2.0, rh_min=45.0)]
+        result = interpolate_water_table_depth(climate, [base], [1.5])
+        assert result[0] is not climate[0]
+        assert climate[0].wt_depth_m is None

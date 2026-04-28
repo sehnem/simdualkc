@@ -116,6 +116,10 @@ class SoilParams(BaseModel):
     cr_b3: float | None = Field(default=None, description="Liu CR param b3")
     cr_a4: float | None = Field(default=None, description="Liu CR param a4")
     cr_b4: float | None = Field(default=None, description="Liu CR param b4")
+    cr_simplified_a: float | None = Field(default=None, description="Simplified Liu CR param a")
+    cr_simplified_b: float | None = Field(default=None, description="Simplified Liu CR param b")
+    cr_simplified_c: float | None = Field(default=None, description="Simplified Liu CR param c")
+    cr_simplified_d: float | None = Field(default=None, description="Simplified Liu CR param d")
 
     @model_validator(mode="after")
     def _theta_order(self) -> "SoilParams":
@@ -397,6 +401,123 @@ class IrrigationEvent(BaseModel):
     fw: float = Field(default=1.0, gt=0.0, le=1.0, description="Wetted fraction [—]")
 
 
+class IrrigationIntervalPeriod(BaseModel):
+    """A date range with a minimum interval between irrigation events.
+
+    Used for rotational delivery schedules where the minimum days between
+    irrigations changes by season (e.g. every 15 days early, every 5 days mid).
+
+    Attributes:
+        start_date: First day of the period (inclusive).
+        end_date: Last day of the period (inclusive).
+        min_interval_days: Minimum days between irrigation events in this period.
+    """
+
+    start_date: datetime.date
+    end_date: datetime.date
+    min_interval_days: int = Field(ge=1, description="Min days between events")
+
+    @model_validator(mode="after")
+    def _date_order(self) -> "IrrigationIntervalPeriod":
+        if self.start_date > self.end_date:
+            msg = "start_date must not be after end_date"
+            raise ValueError(msg)
+        return self
+
+
+class FarmPondSupply(BaseModel):
+    """A water supply event that refills the on-farm pond.
+
+    Attributes:
+        date: Date the supply becomes available.
+        depth_mm: Depth of water added to the pond [mm].
+    """
+
+    date: datetime.date
+    depth_mm: float = Field(gt=0.0, description="Supply depth [mm]")
+
+
+class FarmPondConstraint(BaseModel):
+    """Finite on-farm water supply that limits total irrigation.
+
+    Attributes:
+        initial_storage_mm: Water in the pond at the start of the season [mm].
+        supplies: Optional list of refill events during the season.
+        max_storage_mm: Optional maximum pond capacity [mm].
+    """
+
+    initial_storage_mm: float = Field(ge=0.0, description="Initial pond storage [mm]")
+    supplies: list[FarmPondSupply] = Field(default_factory=list)
+    max_storage_mm: float | None = Field(
+        default=None, gt=0.0, description="Maximum pond capacity [mm]"
+    )
+
+    @model_validator(mode="after")
+    def _storage_capacity(self) -> "FarmPondConstraint":
+        if self.max_storage_mm is not None and self.initial_storage_mm > self.max_storage_mm:
+            msg = "initial_storage_mm must not exceed max_storage_mm"
+            raise ValueError(msg)
+        return self
+
+
+_VALID_STAGES: frozenset = frozenset({"ini", "dev", "mid", "late"})
+
+
+class DeliveryConstraints(BaseModel):
+    """Optional delivery-side constraints on automated irrigation.
+
+    These constraints are applied *after* the MAD/deficit trigger decides
+    that irrigation is needed, and *before* the water is applied to the soil.
+
+    Attributes:
+        interval_schedule: Date-range-specific minimum intervals. If the
+            current date falls within a range, that range's interval overrides
+            the strategy's base min_interval_days.
+        max_depth_mm: Maximum irrigation depth per event [mm]. Computed depth
+            is capped to this value.
+        fixed_depth_mm: If set, irrigation depth is fixed to this value
+            regardless of soil depletion. Overrides stage_fixed_depth_mm.
+        stage_fixed_depth_mm: Per-stage fixed depths keyed "ini", "dev",
+            "mid", "late". Used only when fixed_depth_mm is not set.
+        stage_target_pct_taw: Per-stage refill targets keyed "ini", "dev",
+            "mid", "late". Overrides the strategy's base target_pct_taw.
+        farm_pond: On-farm pond supply that limits cumulative irrigation.
+    """
+
+    interval_schedule: list[IrrigationIntervalPeriod] | None = Field(default=None)
+    max_depth_mm: float | None = Field(default=None, gt=0.0)
+    fixed_depth_mm: float | None = Field(default=None, gt=0.0)
+    stage_fixed_depth_mm: dict[str, float] | None = Field(default=None)
+    stage_target_pct_taw: dict[str, float] | None = Field(default=None)
+    farm_pond: FarmPondConstraint | None = Field(default=None)
+
+    @field_validator("stage_fixed_depth_mm", "stage_target_pct_taw")
+    @classmethod
+    def _stage_dict_keys(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+        if v is not None:
+            invalid = set(v.keys()) - _VALID_STAGES
+            if invalid:
+                msg = f"Invalid stage keys: {invalid}. Must be subset of {_VALID_STAGES}"
+                raise ValueError(msg)
+        return v
+
+    @field_validator("stage_fixed_depth_mm")
+    @classmethod
+    def _fixed_depth_values(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+        if v is not None and any(val <= 0.0 for val in v.values()):
+            msg = "All stage_fixed_depth_mm values must be > 0.0"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("stage_target_pct_taw")
+    @classmethod
+    def _target_pct_values(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+        if v is not None and any(not (0.0 <= val <= 100.0) for val in v.values()):
+            msg = "All stage_target_pct_taw values must be in [0.0, 100.0]"
+            raise ValueError(msg)
+        return v
+
+
 class MADThresholdStrategy(BaseModel):
     """Management Allowed Depletion threshold strategy.
 
@@ -418,6 +539,9 @@ class MADThresholdStrategy(BaseModel):
         ge=0, default=0, description="Stop irrigation N days before harvest"
     )
     min_interval_days: int = Field(ge=1, default=1, description="Min days between events")
+    delivery: DeliveryConstraints | None = Field(
+        default=None, description="Optional delivery-side constraints"
+    )
 
 
 class DeficitIrrigationStrategy(BaseModel):
@@ -430,8 +554,25 @@ class DeficitIrrigationStrategy(BaseModel):
     """
 
     stage_mad: dict[str, float] = Field(description="MAD by growth stage")
+
+    @field_validator("stage_mad")
+    @classmethod
+    def _validate_stage_mad(cls, v: dict[str, float]) -> dict[str, float]:
+        invalid_keys = set(v.keys()) - _VALID_STAGES
+        if invalid_keys:
+            msg = f"Invalid stage keys: {invalid_keys}. Must be subset of {_VALID_STAGES}"
+            raise ValueError(msg)
+        if any(not (0.0 <= val <= 1.0) for val in v.values()):
+            msg = "All stage_mad values must be in [0.0, 1.0]"
+            raise ValueError(msg)
+        return v
+
     target_pct_taw: float = Field(ge=0.0, le=100.0, default=100.0)
     days_before_harvest_stop: int = Field(ge=0, default=0)
+    min_interval_days: int = Field(ge=1, default=1, description="Min days between events")
+    delivery: DeliveryConstraints | None = Field(
+        default=None, description="Optional delivery-side constraints"
+    )
 
 
 class IrrigationStrategy(BaseModel):
@@ -588,6 +729,28 @@ class SimulationConfig(BaseModel):
             msg = "climate records must be in chronological order"
             raise ValueError(msg)
         return v
+
+    @model_validator(mode="after")
+    def _cr_parametric_consistency(self) -> "SimulationConfig":
+        if self.cr_method == CRMethod.PARAMETRIC:
+            soil = self.soil
+            has_full = all(
+                getattr(soil, f"cr_{name}") is not None
+                for name in ["a1", "b1", "a2", "b2", "a3", "b3", "a4", "b4"]
+            )
+            has_simplified = all(
+                getattr(soil, f"cr_simplified_{name}") is not None for name in ["a", "b", "c", "d"]
+            )
+            if not has_full and not has_simplified:
+                msg = (
+                    "Parametric CR requires either all 8 full coefficients (cr_a1..cr_b4) "
+                    "or all 4 simplified coefficients (cr_simplified_a..cr_simplified_d) on soil"
+                )
+                raise ValueError(msg)
+            if not any(r.wt_depth_m is not None for r in self.climate):
+                msg = "Parametric CR requires at least one ClimateRecord with wt_depth_m not None"
+                raise ValueError(msg)
+        return self
 
 
 # ---------------------------------------------------------------------------

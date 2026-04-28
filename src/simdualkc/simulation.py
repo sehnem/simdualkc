@@ -24,9 +24,12 @@ from simdualkc.evaporation import (
     update_evaporative_depletion,
 )
 from simdualkc.irrigation import (
+    apply_delivery_constraints,
     compute_irrigation_depth,
     get_days_to_harvest,
     get_mad_for_day,
+    get_min_interval_for_date,
+    get_target_pct_taw_for_day,
     should_trigger_irrigation,
 )
 from simdualkc.kcb import (
@@ -52,6 +55,7 @@ from simdualkc.models import (
     CropParams,
     DailyResult,
     DPMethod,
+    FarmPondConstraint,
     IrrigationEvent,
     SimulationConfig,
     SimulationResult,
@@ -108,6 +112,23 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     results: list[DailyResult] = []
     last_irrigation_day = 0
 
+    pond_storage_mm = 0.0
+    farm_pond: FarmPondConstraint | None = None
+    if (
+        config.irrigation_strategy.strategy_type == "mad_threshold"
+        and config.irrigation_strategy.mad_threshold
+        and config.irrigation_strategy.mad_threshold.delivery
+    ):
+        farm_pond = config.irrigation_strategy.mad_threshold.delivery.farm_pond
+    elif (
+        config.irrigation_strategy.strategy_type == "deficit"
+        and config.irrigation_strategy.deficit
+        and config.irrigation_strategy.deficit.delivery
+    ):
+        farm_pond = config.irrigation_strategy.deficit.delivery.farm_pond
+    if farm_pond is not None:
+        pond_storage_mm = farm_pond.initial_storage_mm
+
     t_act_sum = 0.0
     t_pot_sum = 0.0
 
@@ -155,16 +176,32 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         # Get irrigation for this day (manual + automated)
         irrig, fw = _get_irrigation(date, config.irrigation, config.fw_base)
 
+        # Manual irrigation resets the interval timer for automated scheduling
+        if irrig > 0.0:
+            last_irrigation_day = day_of_sim
+
+        if farm_pond is not None:
+            for supply in farm_pond.supplies:
+                if supply.date == date:
+                    pond_storage_mm += supply.depth_mm
+                    if farm_pond.max_storage_mm is not None:
+                        pond_storage_mm = min(pond_storage_mm, farm_pond.max_storage_mm)
+
         # Automated irrigation (MAD threshold or deficit)
         strat = config.irrigation_strategy
         if strat.strategy_type == "mad_threshold" and strat.mad_threshold:
             mad = get_mad_for_day(day_of_sim, crop, strat.mad_threshold)
             days_to_harvest = get_days_to_harvest(day_of_sim, crop)
-            # taw/raw not yet computed; use from previous iteration
             taw_for_irrig = (
                 compute_taw_multilayer(soil.layers, zr)
                 if soil.uses_multilayer() and soil.layers
                 else compute_taw(soil.theta_fc, soil.theta_wp, zr)
+            )
+            delivery = strat.mad_threshold.delivery
+            min_interval = get_min_interval_for_date(
+                date,
+                delivery.interval_schedule if delivery else None,
+                strat.mad_threshold.min_interval_days,
             )
             if should_trigger_irrigation(
                 dr=dr,
@@ -174,13 +211,17 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 harvest_stop_days=strat.mad_threshold.days_before_harvest_stop,
                 last_irrigation_day=last_irrigation_day,
                 current_day=day_of_sim,
-                min_interval=strat.mad_threshold.min_interval_days,
+                min_interval=min_interval,
             ):
-                irrig_auto = compute_irrigation_depth(
-                    dr, taw_for_irrig, strat.mad_threshold.target_pct_taw
-                )
-                irrig += irrig_auto
-                last_irrigation_day = day_of_sim
+                target_pct = get_target_pct_taw_for_day(day_of_sim, crop, strat.mad_threshold)
+                irrig_auto = compute_irrigation_depth(dr, taw_for_irrig, target_pct)
+                irrig_auto = apply_delivery_constraints(irrig_auto, stage, delivery)
+                if farm_pond is not None and irrig_auto > 0.0:
+                    irrig_auto = min(irrig_auto, pond_storage_mm)
+                    pond_storage_mm -= irrig_auto
+                if irrig_auto > 0.0:
+                    irrig += irrig_auto
+                    last_irrigation_day = day_of_sim
         elif strat.strategy_type == "deficit" and strat.deficit:
             mad = get_mad_for_day(day_of_sim, crop, strat.deficit)
             days_to_harvest = get_days_to_harvest(day_of_sim, crop)
@@ -188,6 +229,12 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 compute_taw_multilayer(soil.layers, zr)
                 if soil.uses_multilayer() and soil.layers
                 else compute_taw(soil.theta_fc, soil.theta_wp, zr)
+            )
+            delivery = strat.deficit.delivery
+            min_interval = get_min_interval_for_date(
+                date,
+                delivery.interval_schedule if delivery else None,
+                strat.deficit.min_interval_days,
             )
             if should_trigger_irrigation(
                 dr=dr,
@@ -197,13 +244,17 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 harvest_stop_days=strat.deficit.days_before_harvest_stop,
                 last_irrigation_day=last_irrigation_day,
                 current_day=day_of_sim,
-                min_interval=1,
+                min_interval=min_interval,
             ):
-                irrig_auto = compute_irrigation_depth(
-                    dr, taw_for_irrig, strat.deficit.target_pct_taw
-                )
-                irrig += irrig_auto
-                last_irrigation_day = day_of_sim
+                target_pct = get_target_pct_taw_for_day(day_of_sim, crop, strat.deficit)
+                irrig_auto = compute_irrigation_depth(dr, taw_for_irrig, target_pct)
+                irrig_auto = apply_delivery_constraints(irrig_auto, stage, delivery)
+                if farm_pond is not None and irrig_auto > 0.0:
+                    irrig_auto = min(irrig_auto, pond_storage_mm)
+                    pond_storage_mm -= irrig_auto
+                if irrig_auto > 0.0:
+                    irrig += irrig_auto
+                    last_irrigation_day = day_of_sim
 
         # Kc_max
         kc_max = compute_kc_max(kcb, u2, rh_min, h)
@@ -392,20 +443,26 @@ def _compute_cr(
 
     if config.cr_method == CRMethod.PARAMETRIC:
         soil = config.soil
-        if (
-            soil.cr_a1 is not None
-            and soil.cr_b1 is not None
-            and soil.cr_a2 is not None
-            and soil.cr_b2 is not None
-            and soil.cr_a3 is not None
-            and soil.cr_b3 is not None
-            and soil.cr_a4 is not None
-            and soil.cr_b4 is not None
-            and climate.wt_depth_m is not None
-        ):
-            lai = get_lai(day_of_sim, crop)
+        has_full = all(
+            getattr(soil, f"cr_{name}") is not None
+            for name in ["a1", "b1", "a2", "b2", "a3", "b3", "a4", "b4"]
+        )
+        has_simplified = all(
+            getattr(soil, f"cr_simplified_{name}") is not None for name in ["a", "b", "c", "d"]
+        )
+        lai = get_lai(day_of_sim, crop)
+        wt_depth_m = climate.wt_depth_m
+        if has_full and wt_depth_m is not None:
+            assert soil.cr_a1 is not None
+            assert soil.cr_b1 is not None
+            assert soil.cr_a2 is not None
+            assert soil.cr_b2 is not None
+            assert soil.cr_a3 is not None
+            assert soil.cr_b3 is not None
+            assert soil.cr_a4 is not None
+            assert soil.cr_b4 is not None
             return compute_cr_parametric_complete(
-                z_wt=climate.wt_depth_m,
+                z_wt=wt_depth_m,
                 lai=lai,
                 a1=soil.cr_a1,
                 b1=soil.cr_b1,
@@ -416,14 +473,20 @@ def _compute_cr(
                 a4=soil.cr_a4,
                 b4=soil.cr_b4,
             )
-        return compute_cr_parametric(
-            z_wt=climate.wt_depth_m if climate.wt_depth_m is not None else 1.0,
-            lai=get_lai(day_of_sim, crop),
-            a_c=0.0,
-            b_c=1.0,
-            c_c=0.0,
-            d_c=1.0,
-        )
+        if has_simplified and wt_depth_m is not None:
+            assert soil.cr_simplified_a is not None
+            assert soil.cr_simplified_b is not None
+            assert soil.cr_simplified_c is not None
+            assert soil.cr_simplified_d is not None
+            return compute_cr_parametric(
+                z_wt=wt_depth_m,
+                lai=lai,
+                a_c=soil.cr_simplified_a,
+                b_c=soil.cr_simplified_b,
+                c_c=soil.cr_simplified_c,
+                d_c=soil.cr_simplified_d,
+            )
+        return 0.0
     return 0.0
 
 

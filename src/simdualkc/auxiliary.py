@@ -3,10 +3,13 @@
 All functions are stateless and operate on scalar floats.
 """
 
+import datetime
 import math
 from pathlib import Path
 
 import pandas as pd
+
+from simdualkc.models import ClimateRecord
 
 # AMC class boundaries (CN adjustment ratios):
 #   AMC I  (dry):  CN_I  = CN_II / (2.281 - 0.01281 * CN_II)   [USDA NRCS]
@@ -155,9 +158,9 @@ def compute_cr_parametric(
 ) -> float:
     """Compute capillary rise via Liu et al. (2006) parametric model.
 
-    The functional form is typically:
+    The functional form is:
 
-    ``CR = a_c / (z_wt^b_c) * exp(-c_c * LAI^d_c)``
+    ``CR = a_c * z_wt^b_c * exp(-c_c * LAI^d_c)``
 
     The exact empirical coefficients are texture/depth-dependent and
     must be supplied by the caller from lookup tables.
@@ -175,7 +178,7 @@ def compute_cr_parametric(
     """
     if z_wt <= 0.0:
         return 0.0
-    return (a_c / (z_wt**b_c)) * math.exp(-c_c * lai**d_c)
+    return (a_c * (z_wt**b_c)) * math.exp(-c_c * lai**d_c)
 
 
 def compute_cr_parametric_complete(
@@ -252,3 +255,65 @@ def get_soil_list() -> pd.DataFrame:
     data_path = Path(__file__).parent / "data" / "soils.parquet"
     df = pd.read_parquet(data_path)
     return df[["Solo_ID", "Solo"]]
+
+
+def interpolate_water_table_depth(
+    climate: list[ClimateRecord],
+    wt_dates: list[datetime.date],
+    wt_depths: list[float],
+) -> list[ClimateRecord]:
+    """Linearly interpolate sparse water table depth measurements onto the daily climate sequence.
+
+    Returns new :class:`~simdualkc.models.ClimateRecord` objects with ``wt_depth_m`` filled.
+    Holds the first measured value before the earliest date and the last measured value
+    after the latest date.
+
+    Args:
+        climate: Ordered daily climate records.
+        wt_dates: Dates on which water table depth was measured.
+        wt_depths: Measured water table depths [m].
+
+    Returns:
+        New list of climate records with ``wt_depth_m`` populated.
+
+    Raises:
+        ValueError: If ``wt_dates`` and ``wt_depths`` are empty or of unequal length.
+    """
+    if not wt_dates or not wt_depths or len(wt_dates) != len(wt_depths):
+        msg = "wt_dates and wt_depths must be non-empty and of equal length"
+        raise ValueError(msg)
+
+    sorted_pairs = sorted(zip(wt_dates, wt_depths, strict=True))
+    dates = [p[0] for p in sorted_pairs]
+    depths = [p[1] for p in sorted_pairs]
+
+    result: list[ClimateRecord] = []
+    for record in climate:
+        d = record.date
+        if d <= dates[0]:
+            new_depth = depths[0]
+        elif d >= dates[-1]:
+            new_depth = depths[-1]
+        else:
+            # Linear search for interval (dates is small)
+            new_depth = depths[-1]
+            for i in range(len(dates) - 1):
+                if dates[i] <= d <= dates[i + 1]:
+                    delta = (dates[i + 1] - dates[i]).days
+                    if delta == 0:
+                        new_depth = depths[i]
+                    else:
+                        frac = (d - dates[i]).days / delta
+                        new_depth = depths[i] + frac * (depths[i + 1] - depths[i])
+                    break
+        result.append(
+            ClimateRecord(
+                date=record.date,
+                eto=record.eto,
+                precip=record.precip,
+                u2=record.u2,
+                rh_min=record.rh_min,
+                wt_depth_m=new_depth,
+            )
+        )
+    return result
