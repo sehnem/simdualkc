@@ -1,44 +1,52 @@
 # Gap Analysis: Python Implementation vs. SIMDualKc Tutorial
 
-This document tracks the implementation status of features from the official SIMDualKc tutorial.
+This document tracks the implementation status of features from the official SIMDualKc tutorial (`docs/simdual_tutorial_2018.pdf`).
 
 ## 1. Mandatory Input Data
 
 ### Soil Data Profile
-- **[PARTIAL] Multi-layer Soil Support**: Up to 5 layers are supported in `models.py` and `water_balance.py` with dynamic TAW by root depth. TAW computation via weight fractions or pedo-transfer functions (PTF) remains external pre-processing.
-- **[MISSING] TAW Computation Methods**: Built-in support for computing TAW via weight fractions or PTF is not implemented.
-- **[MISSING] Soil Texture Details**: Sand/clay percentages for the evaporable layer (used to estimate TEW/REW) are not stored or used.
+- **[DONE] Multi-layer Soil Support**: Up to 5 layers in `models.py` / `water_balance.py` with dynamic TAW by root depth.
+- **[MISSING] TAW Computation via PTF**: Built-in pedotransfer functions (sand/clay % → θ_fc, θ_wp, TAW) not implemented. Sand/clay % are stored in `SoilLayer` but not used for estimation.
+- **[MISSING] TEW/REW from Texture**: Sand/clay percentages for the evaporable layer (used to estimate TEW/REW) are not used automatically.
 
 ### Climate Data Profile
-- **[DONE] ETo Calculator**: FAO-56 Penman-Monteith implemented in `eto.py` — `compute_eto` and `weather_to_climate_records`.
-- **[MISSING] Climate Data Validation**: The "Jan 1st to Dec 31st" rule and automatic padding of missing days are not implemented.
+- **[DONE] ETo Calculator**: FAO-56 Penman-Monteith in `eto.py` — `compute_eto` and `weather_to_climate_records`.
+- **[MISSING] Climate Data Validation**: Jan 1 → Dec 31 completeness check and auto-padding with mean values.
 
 ### Crop Characterization Profile
-- **[MISSING] Forages with Multiple Cuts**: Logic for cutting cycles, varying root depths, and growth stages between cuts is missing.
-- **[MISSING] LAI-based Fraction Cover**: Full derivation of fc from LAI at specific dates is not yet implemented. Current model uses simplified interpolation.
+- **[MISSING] Forages with Multiple Cuts**: Cutting cycles, root depth reset between cuts, varying Kcb after cut. Database has `T_Forragens` with `DurIni/Dev/Mid/Late`, `CutDate`, `NumOrdCiclo`.
+- **[DONE] LAI-based Fraction Cover**: `lai_values` + `lai_dates` on `CropParams`, `interpolate_lai` in `kcb.py`, `lai_to_fc` with configurable `k_ext`.
 
 ### Irrigation Management Profile
-- **[DONE] Automated Irrigation Scheduling**: MAD threshold and deficit irrigation strategies implemented in `irrigation.py`.
-- **[MISSING] Delivery Constraints**: Rotational deliveries and minimum interval constraints are not implemented.
-- **[MISSING] Harvest-relative Stop**: Option to stop irrigation N days before harvest is not implemented.
+- **[DONE] Automated Irrigation Scheduling**: MAD threshold and deficit strategies in `irrigation.py`.
+- **[DONE] Harvest-relative Stop**: `days_before_harvest_stop` on `MADThresholdStrategy` and `DeficitIrrigationStrategy`.
+- **[DONE] Minimum Interval**: `min_interval_days` on `MADThresholdStrategy`.
+- **[MISSING] Delivery Constraints**: Rotational delivery schedules (fixed intervals from `T_IrrigFrequency`), farm pond, fixed-depth irrigation.
 
 ## 2. Optional Input Data (Extensions)
 
-- **[MISSING] Active Groundcover**: No support for row/inter-row management, tillage effects, or groundcover growth dynamics.
-- **[MISSING] Intercropping**: Only one crop at a time. Overlapping or contiguous intercropping is not supported.
+- **[DONE] Active Groundcover**: `GroundcoverParams` in `models.py`, `compute_kcb_with_groundcover` in `kcb.py`. Combined Kcb for orchards/vineyards with inter-row vegetation.
+- **[DONE] Mulch**: `MulchParams` in `models.py`, mulch effects in `compute_few` (`evaporation.py`).
+- **[DONE] Salinity Stress**: `SalinityParams` in `models.py`, `compute_ks_salinity` in `water_balance.py` (Mass-Hoffman).
+- **[DONE] Yield Estimation**: `YieldParams` in `models.py`, Stewart model in `yield_model.py`.
+- **[MISSING] Intercropping**: Only one crop at a time. Overlapping or contiguous intercropping not supported.
 - **[PARTIAL] Groundwater**:
-    - Capillary rise parametric method (Liu et al., 2006) is stubbed and requires water table depth inputs.
-    - Deep percolation parametric method is partially implemented but needs verification.
+    - Constant CR: `compute_cr_constant` in `auxiliary.py` — fully implemented.
+    - Parametric CR (Liu et al., 2006): `compute_cr_parametric_complete` in `auxiliary.py` — implemented, needs validation against `T_Resultados`.
+    - Water table depth: `wt_depth_m` on `ClimateRecord` — field exists, not yet integrated into standard workflows.
+    - Deep percolation parametric: `compute_dp_parametric` in `auxiliary.py` — implemented, needs validation.
 
 ## 3. Workflow & Results
 
 - **[DONE] Yield Loss Summaries**: `format_yield_loss_table` and `compute_stress_summary` in `reporting.py`.
 - **[DONE] Irrigation Opportunity Stats**: `format_irrigation_opportunity_table` and `compute_irrigation_summary` in `reporting.py`.
-- **[MISSING] Graphics Generation**: No built-in plotting. Relies on external pandas/matplotlib.
+- **[DONE] Simulation Summary**: `SimulationSummary` combining stress + irrigation metrics, auto-computed by `run_simulation`.
+- **[MISSING] Graphics Generation**: No built-in plotting. Relies on external pandas/matplotlib (examples show how).
 
 ## 4. Data Access
 
 - **[DONE] Database Auxiliary Functions**: `list_crops`, `list_soils`, `load_crop_params`, `load_soil_params` in `data_loader.py`.
+- **[DONE] Crop/Soil Parquet Files**: Bundled in `src/simdualkc/data/`.
 
 ---
 
@@ -46,18 +54,31 @@ This document tracks the implementation status of features from the official SIM
 
 ### Done
 - ETo calculator (FAO-56 Penman-Monteith)
+- LAI-based fraction cover (interpolation + fc conversion)
 - Automated irrigation scheduling (MAD and deficit strategies)
+- Harvest-relative irrigation stop + minimum interval
+- Active groundcover (orchard/vineyard combined Kcb)
+- Mulch effects (evaporation reduction)
+- Salinity stress (Mass-Hoffman)
+- Yield estimation (Stewart water-yield model)
 - Yield loss and irrigation summaries
 - Database helpers for crop/soil selection
-- Multi-layer soil (partial — model layer, not PTF)
+- Multi-layer soil (up to 5 layers, dynamic TAW)
+- Parametric capillary rise (Liu et al., 2006)
+- Parametric deep percolation (Liu et al., 2006)
+
+### Short-term (next)
+- Forage multi-cut logic (cutting cycles, root depth reset, Kcb reset)
+- Full CR parametric validation against `T_Resultados`
+- Delivery constraints in `IrrigationStrategy`
 
 ### Mid-term
-- Full LAI-based fraction cover derivation
 - Climate data validation and gap padding
-- Delivery constraints (rotational, harvest-relative stop)
+- PTF-based soil parameter estimation (sand/clay → θ_fc, θ_wp, TEW, REW)
+- Regression tests against `T_Resultados` (4186 rows of daily output)
 
 ### Long-term
-- Active groundcover dynamics
 - Intercropping support
-- Full groundwater model (capillary rise verification)
-- Built-in graphics generation
+- Regional batch runner (parallel `run_simulation` over grids)
+- Layer 2: REST API wrapping the core
+- Export formats for irrigation scheduling reports

@@ -29,6 +29,8 @@ dev = [
     "ruff>=0.4",
     "ty>=0.0.1a1",
     "pre-commit>=3.7",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
 ]
 
 [tool.hatch.build.targets.wheel]
