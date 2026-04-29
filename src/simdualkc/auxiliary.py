@@ -197,8 +197,10 @@ def compute_cr_parametric_complete(
 ) -> float:
     """Compute capillary rise via Liu et al. (2006) full parametric model.
 
-    Implementation follows the ``cal_capillaryRise`` function from the
-    R package *simET* (Liu et al. 2006, Agric. Water Manage. 84:27-40).
+    Liu, Y., Pereira, L.S., Fernando, R.M., 2006. Fluxes through the bottom
+    boundary of the root zone in silty soils: Parametric approaches to
+    estimate groundwater contribution and percolation. Agricultural Water
+    Management, 84(1-2), 27-40.
 
     Steps:
       1. Wc = a1 * Dw^b1                     (critical soil water storage)
@@ -248,6 +250,48 @@ def compute_cr_parametric_complete(
             return cr_max
         return cr_max * ((wc - wa) / (wc - ws))
     return 0.0
+
+
+def compute_cr_parametric_complete_with_guards(
+    dw: float,
+    wa: float,
+    lai: float,
+    etm: float,
+    a1: float,
+    b1: float,
+    a2: float,
+    b2: float,
+    a3: float,
+    b3: float,
+    a4: float,
+    b4: float,
+    *,
+    days_since_irrigation: int = 999,
+) -> float:
+    """Liu et al. (2006) parametric CR + empirical Access-software guards.
+
+    Guards (reverse-engineered from original SIMDualKc T_Resultados):
+    1. Early-season: if LAI < 0.3 and ETm <= 4.0, return 0.
+    2. Post-irrigation: if days_since_irrigation <= 2, return 0.
+    """
+    if lai < 0.3 and etm <= 4.0:
+        return 0.0
+    if days_since_irrigation <= 2:
+        return 0.0
+    return compute_cr_parametric_complete(
+        dw=dw,
+        wa=wa,
+        lai=lai,
+        etm=etm,
+        a1=a1,
+        b1=b1,
+        a2=a2,
+        b2=b2,
+        a3=a3,
+        b3=b3,
+        a4=a4,
+        b4=b4,
+    )
 
 
 def get_crop_list() -> pd.DataFrame:

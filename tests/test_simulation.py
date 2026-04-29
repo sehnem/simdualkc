@@ -260,9 +260,13 @@ class TestParametricCrIntegration:
         # At least one day with positive CR
         assert any(r.cr > 0.0 for r in result_cr.daily_results)
 
-        # Dr should be strictly lower with CR than without
+        # Dr should be lower (or equal on guard days) with CR than without
+        days_strictly_lower = 0
         for r_cr, r_none in zip(result_cr.daily_results, result_none.daily_results, strict=True):
-            assert r_cr.dr < r_none.dr
+            assert r_cr.dr <= r_none.dr
+            if r_cr.dr < r_none.dr:
+                days_strictly_lower += 1
+        assert days_strictly_lower > 0
 
 
 class TestDeliveryConstraints:

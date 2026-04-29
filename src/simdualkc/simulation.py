@@ -11,7 +11,7 @@ from simdualkc.auxiliary import (
     adjust_cn_for_moisture,
     compute_cr_constant,
     compute_cr_parametric,
-    compute_cr_parametric_complete,
+    compute_cr_parametric_complete_with_guards,
     compute_dp_parametric,
     compute_runoff_cn,
 )
@@ -329,7 +329,21 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_pot_sum += kcb * eto
 
         # Capillary rise
-        cr = _compute_cr(config, dr, raw, climate, crop, day_of_sim, taw, zr, kcb, ke, eto)
+        days_since_irrigation = day_of_sim - last_irrigation_day
+        cr = _compute_cr(
+            config,
+            dr,
+            raw,
+            climate,
+            crop,
+            day_of_sim,
+            taw,
+            zr,
+            kcb,
+            ke,
+            eto,
+            days_since_irrigation,
+        )
 
         # Root-zone depletion update + deep percolation
         if config.dp_method == DPMethod.PARAMETRIC and soil.a_d and soil.b_d:
@@ -437,6 +451,7 @@ def _compute_cr(
     kcb: float,
     ke: float,
     eto: float,
+    days_since_irrigation: int = 999,
 ) -> float:
     """Dispatch capillary rise computation based on configured method."""
     if config.cr_method == CRMethod.NONE:
@@ -469,7 +484,7 @@ def _compute_cr(
             dw = max(0.0, wt_depth_m - zr)
             wa = taw - dr
             etm = kcb * eto
-            return compute_cr_parametric_complete(
+            return compute_cr_parametric_complete_with_guards(
                 dw=dw,
                 wa=wa,
                 lai=lai,
@@ -482,6 +497,7 @@ def _compute_cr(
                 b3=soil.cr_b3,
                 a4=soil.cr_a4,
                 b4=soil.cr_b4,
+                days_since_irrigation=days_since_irrigation,
             )
         if has_simplified and wt_depth_m is not None:
             assert soil.cr_simplified_a is not None
