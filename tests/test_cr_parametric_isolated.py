@@ -33,6 +33,7 @@ from simdualkc.auxiliary import (
     compute_cr_parametric_complete,
     compute_cr_parametric_complete_with_guards,
 )
+from simdualkc.water_balance import compute_wwp_mm, compute_wwp_mm_multilayer
 from tests.conftest import load_cr_fixture
 
 FALLOW_SIMS = [27, 28, 29, 30, 31, 32]
@@ -92,8 +93,15 @@ def _compute_cr_series(
         if wt_depth_m is None or pd.isna(wt_depth_m):
             continue
 
-        dw = max(0.0, wt_depth_m - float(row["zr"]))
+        zr = float(row["zr"])
+        dw = wt_depth_m
         wa = float(row["taw"]) - float(row["dr"])
+        wwp_mm = (
+            compute_wwp_mm_multilayer(soil.layers, zr)
+            if soil.uses_multilayer() and soil.layers
+            else compute_wwp_mm(soil.theta_wp, zr)
+        )
+        w = wa + wwp_mm
         lai = lai_by_date.get(d, _lai_from_fc(float(row["fc"]), k_ext))
 
         # Liu et al. (2006) uses ETm = Tr (crop transpiration) = Kcb * ETo.
@@ -109,7 +117,7 @@ def _compute_cr_series(
             days_since_irrigation = int(row["day_of_sim"]) - last_irrig_day
             act = compute_cr_parametric_complete_with_guards(
                 dw=dw,
-                wa=wa,
+                w=w,
                 lai=lai,
                 etm=etm,
                 a1=soil.cr_a1,
@@ -127,7 +135,7 @@ def _compute_cr_series(
         else:
             act = compute_cr_parametric_complete(
                 dw=dw,
-                wa=wa,
+                w=w,
                 lai=lai,
                 etm=etm,
                 a1=soil.cr_a1,

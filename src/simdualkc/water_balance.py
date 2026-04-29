@@ -57,6 +57,54 @@ def compute_taw_multilayer(layers: list[SoilLayer], zr: float) -> float:
     return taw
 
 
+def compute_wwp_mm(theta_wp: float, zr: float) -> float:
+    """Compute water stored at wilting point in the root zone.
+
+    ``WWP = 1000 * θ_WP * Zr``
+
+    Args:
+        theta_wp: Volumetric water content at wilting point [m³/m³].
+        zr: Root zone depth [m].
+
+    Returns:
+        Water at wilting point [mm].
+    """
+    return 1000.0 * theta_wp * zr
+
+
+def compute_wwp_mm_multilayer(layers: list[SoilLayer], zr: float) -> float:
+    """Compute water at wilting point by integrating layers up to root depth.
+
+    WWP = Σ[1000 × θ_WP,i × Δz_i,active]
+
+    Where Δz_i,active is the portion of layer i within the root zone.
+
+    Args:
+        layers: Soil layers ordered by bottom depth [m]. Each layer has
+            depth_m (bottom), theta_wp.
+        zr: Current root zone depth [m].
+
+    Returns:
+        Water at wilting point [mm].
+    """
+    if zr <= 0.0:
+        return 0.0
+
+    wwp = 0.0
+    depth_top = 0.0
+
+    for layer in layers:
+        depth_bottom = layer.depth_m
+        if depth_top >= zr:
+            break
+        dz_active = min(depth_bottom, zr) - depth_top
+        if dz_active > 0:
+            wwp += 1000.0 * layer.theta_wp * dz_active
+        depth_top = depth_bottom
+
+    return wwp
+
+
 def compute_raw(taw: float, p: float) -> float:
     """Compute Readily Available Water.
 

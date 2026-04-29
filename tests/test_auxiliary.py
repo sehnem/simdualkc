@@ -137,7 +137,7 @@ class TestComputeCrParametricComplete:
     def test_cr_positive_for_dengkou_coefficients(self) -> None:
         cr = compute_cr_parametric_complete(
             dw=1.0,
-            wa=50.0,
+            w=50.0,
             lai=2.0,
             etm=3.0,
             a1=380.0,
@@ -164,9 +164,9 @@ class TestComputeCrParametricComplete:
             "b4": -0.65,
         }
         # ETm > 4 => Dwc = 1.4, so Dw=2.0 and Dw=3.0 both fall in the a4-branch.
-        # Wa=100 is well below Ws for both depths, so moisture reduction is not active.
-        cr_low = compute_cr_parametric_complete(dw=2.0, wa=100.0, lai=2.0, etm=5.0, **coeffs)
-        cr_high = compute_cr_parametric_complete(dw=3.0, wa=100.0, lai=2.0, etm=5.0, **coeffs)
+        # W=100 is well below Ws for both depths, so moisture reduction is not active.
+        cr_low = compute_cr_parametric_complete(dw=2.0, w=100.0, lai=2.0, etm=5.0, **coeffs)
+        cr_high = compute_cr_parametric_complete(dw=3.0, w=100.0, lai=2.0, etm=5.0, **coeffs)
         assert cr_high < cr_low
 
     def test_cr_increases_when_lai_increases(self) -> None:
@@ -182,11 +182,11 @@ class TestComputeCrParametricComplete:
             "a4": 0.0,
             "b4": 0.0,
         }
-        cr_low_lai = compute_cr_parametric_complete(dw=1.0, wa=50.0, lai=1.0, etm=3.0, **coeffs)
-        cr_high_lai = compute_cr_parametric_complete(dw=1.0, wa=50.0, lai=4.0, etm=3.0, **coeffs)
+        cr_low_lai = compute_cr_parametric_complete(dw=1.0, w=50.0, lai=1.0, etm=3.0, **coeffs)
+        cr_high_lai = compute_cr_parametric_complete(dw=1.0, w=50.0, lai=4.0, etm=3.0, **coeffs)
         assert cr_high_lai > cr_low_lai
 
-    def test_cr_zero_when_wa_exceeds_wc(self) -> None:
+    def test_cr_zero_when_w_exceeds_wc(self) -> None:
         # When soil water storage exceeds the critical value, no capillary rise.
         coeffs = {
             "a1": 380.0,
@@ -198,9 +198,9 @@ class TestComputeCrParametricComplete:
             "a4": 0.0,
             "b4": 0.0,
         }
-        # Dw=1.0 => Wc = 380, Ws = 300.  Wa=500 > Wc => CR should be 0.
+        # Dw=1.0 => Wc = 380, Ws = 300.  W=500 > Wc => CR should be 0.
         assert compute_cr_parametric_complete(
-            dw=1.0, wa=500.0, lai=2.0, etm=3.0, **coeffs
+            dw=1.0, w=500.0, lai=2.0, etm=3.0, **coeffs
         ) == pytest.approx(0.0)
 
 

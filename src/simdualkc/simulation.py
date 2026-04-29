@@ -68,6 +68,8 @@ from simdualkc.water_balance import (
     compute_raw,
     compute_taw,
     compute_taw_multilayer,
+    compute_wwp_mm,
+    compute_wwp_mm_multilayer,
     update_root_zone_depletion,
 )
 from simdualkc.yield_model import compute_yield_decrease_transpiration
@@ -172,6 +174,12 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 kcb = compute_kcb_with_groundcover(kcb_full, config.groundcover.kcb_cover, kd_val)
             else:
                 kcb = compute_kcb_density(crop.kc_min, kd_val, kcb_full)
+
+        # Capture irrigation state *before* applying today's irrigation.
+        # The original Access software computes CR before applying the current
+        # day's irrigation, so days_since_irrigation reflects the *previous*
+        # irrigation event on the irrigation day itself.
+        prev_last_irrigation_day = last_irrigation_day
 
         # Get irrigation for this day (manual + automated)
         irrig, fw = _get_irrigation(date, config.irrigation, config.fw_base)
@@ -329,7 +337,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_pot_sum += kcb * eto
 
         # Capillary rise
-        days_since_irrigation = day_of_sim - last_irrigation_day
+        days_since_irrigation = day_of_sim - prev_last_irrigation_day
         cr = _compute_cr(
             config,
             dr,
@@ -481,12 +489,17 @@ def _compute_cr(
             assert soil.cr_b3 is not None
             assert soil.cr_a4 is not None
             assert soil.cr_b4 is not None
-            dw = max(0.0, wt_depth_m - zr)
-            wa = taw - dr
+            dw = wt_depth_m
+            wwp_mm = (
+                compute_wwp_mm_multilayer(soil.layers, zr)
+                if soil.uses_multilayer() and soil.layers
+                else compute_wwp_mm(soil.theta_wp, zr)
+            )
+            w = (taw - dr) + wwp_mm
             etm = kcb * eto
             return compute_cr_parametric_complete_with_guards(
                 dw=dw,
-                wa=wa,
+                w=w,
                 lai=lai,
                 etm=etm,
                 a1=soil.cr_a1,

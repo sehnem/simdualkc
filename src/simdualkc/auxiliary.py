@@ -183,7 +183,7 @@ def compute_cr_parametric(
 
 def compute_cr_parametric_complete(
     dw: float,
-    wa: float,
+    w: float,
     lai: float,
     etm: float,
     a1: float,
@@ -208,13 +208,13 @@ def compute_cr_parametric_complete(
       3. Dwc = a3 * ETm + b3   (ETm <= 4)    (critical groundwater depth)
       4. k = 1 - exp(-0.6 * LAI)  (ETm <= 4) (transpiration factor)
       5. CRmax = k * ETm  if Dw <= Dwc else a4 * Dw^b4
-      6. CR = CRmax                     if Wa < Ws
-              CRmax * (Wc-Wa)/(Wc-Ws)   if Ws <= Wa <= Wc
-              0                         if Wa > Wc
+      6. CR = CRmax                     if W < Ws
+              CRmax * (Wc-W)/(Wc-Ws)   if Ws <= W <= Wc
+              0                         if W > Wc
 
     Args:
-        dw: Groundwater depth below root zone [m] (max(0, wt_depth_m - zr)).
-        wa: Actual soil water storage in root zone [mm] (taw - dr).
+        dw: Water table depth from surface [m].
+        w: Absolute soil water storage in root zone [mm] (ASW + WWP).
         lai: Leaf area index [m²/m²].
         etm: Potential crop transpiration [mm/day] (Kcb * ETo).
         a1, b1, a2, b2, a3, b3, a4, b4: Soil texture coefficients.
@@ -223,15 +223,10 @@ def compute_cr_parametric_complete(
         Capillary rise [mm/day].
     """
     # 1. Critical soil water storage
-    wc = float("inf") if dw <= 0.0 else a1 * (dw**b1)
+    wc = a1 * (dw**b1)
 
     # 2. Steady soil water storage
-    if dw <= 0.0:
-        ws = float("inf")
-    elif dw <= 3.0:
-        ws = a2 * (dw**b2)
-    else:
-        ws = 240.0
+    ws = a2 * (dw**b2) if dw <= 3.0 else 240.0
 
     # 3. Critical groundwater depth
     dwc = a3 * etm + b3 if etm <= 4.0 else 1.4
@@ -243,18 +238,18 @@ def compute_cr_parametric_complete(
     cr_max = k * etm if dw <= dwc else a4 * (dw**b4)
 
     # 6. Actual capillary rise
-    if wa < ws:
+    if w < ws:
         return cr_max
-    if wa <= wc:
+    if w <= wc:
         if wc == ws:
             return cr_max
-        return cr_max * ((wc - wa) / (wc - ws))
+        return cr_max * ((wc - w) / (wc - ws))
     return 0.0
 
 
 def compute_cr_parametric_complete_with_guards(
     dw: float,
-    wa: float,
+    w: float,
     lai: float,
     etm: float,
     a1: float,
@@ -280,7 +275,7 @@ def compute_cr_parametric_complete_with_guards(
         return 0.0
     return compute_cr_parametric_complete(
         dw=dw,
-        wa=wa,
+        w=w,
         lai=lai,
         etm=etm,
         a1=a1,
