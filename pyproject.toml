@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.0",
     "pyarrow>=15.0",
+    "pdfplumber>=0.11.9",
 ]
 
 [project.optional-dependencies]

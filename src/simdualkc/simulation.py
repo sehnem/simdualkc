@@ -113,6 +113,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
 
     results: list[DailyResult] = []
     last_irrigation_day = 0
+    last_irrigation_depth_mm = 0.0
 
     pond_storage_mm = 0.0
     farm_pond: FarmPondConstraint | None = None
@@ -187,6 +188,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         # Manual irrigation resets the interval timer for automated scheduling
         if irrig > 0.0:
             last_irrigation_day = day_of_sim
+            last_irrigation_depth_mm = irrig
 
         if farm_pond is not None:
             for supply in farm_pond.supplies:
@@ -230,6 +232,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 if irrig_auto > 0.0:
                     irrig += irrig_auto
                     last_irrigation_day = day_of_sim
+                    last_irrigation_depth_mm = irrig
         elif strat.strategy_type == "deficit" and strat.deficit:
             mad = get_mad_for_day(day_of_sim, crop, strat.deficit)
             days_to_harvest = get_days_to_harvest(day_of_sim, crop)
@@ -263,6 +266,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 if irrig_auto > 0.0:
                     irrig += irrig_auto
                     last_irrigation_day = day_of_sim
+                    last_irrigation_depth_mm = irrig
 
         # Kc_max
         kc_max = compute_kc_max(kcb, u2, rh_min, h)
@@ -311,14 +315,15 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             is_irrigated_fraction=False,
         )
 
-        # Ks (using previous day's Dr and salinity)
+        # TAW / RAW
         if soil.uses_multilayer() and soil.layers:
             taw = compute_taw_multilayer(soil.layers, zr)
         else:
             taw = compute_taw(soil.theta_fc, soil.theta_wp, zr)
         raw = compute_raw(taw, p)
-        ks = compute_ks(dr, taw, raw, p)
 
+        # Ks from previous day's Dr (FAO-56 / original SIMDualKc approach)
+        ks = compute_ks(dr, taw, raw, p)
         if config.salinity:
             ks_sal = compute_ks_salinity(
                 config.salinity.ec_e,
@@ -328,7 +333,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             )
             ks *= ks_sal
 
-        # ETc_act
+        # Actual ET
         etc_act = compute_etc_act(ks, kcb, ke, eto)
         transp_act = ks * kcb * eto
         evap_act = ke * eto
@@ -336,7 +341,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_act_sum += transp_act
         t_pot_sum += kcb * eto
 
-        # Capillary rise
+        # Capillary rise (uses yesterday's Dr; CR timing: before today's irrigation)
         days_since_irrigation = day_of_sim - prev_last_irrigation_day
         cr = _compute_cr(
             config,
@@ -351,13 +356,13 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             ke,
             eto,
             days_since_irrigation,
+            last_irrigation_depth_mm,
         )
 
-        # Root-zone depletion update + deep percolation
+        # Root-zone depletion update (FAO-56 Eq. 85)
         if config.dp_method == DPMethod.PARAMETRIC and soil.a_d and soil.b_d:
-            # Parametric: compute storage above field capacity, then DP
-            dr_tentative = dr - max(0.0, precip - ro) - irrig - cr + etc_act
-            # Storage = amount above field capacity (dr < 0)
+            net_precip = max(0.0, precip - ro)
+            dr_tentative = dr - net_precip - irrig - cr + etc_act
             storage = max(0.0, -dr_tentative)
             dp = compute_dp_parametric(storage, soil.a_d, soil.b_d)
             new_dr = max(0.0, min(dr_tentative + dp, taw))
@@ -460,6 +465,7 @@ def _compute_cr(
     ke: float,
     eto: float,
     days_since_irrigation: int = 999,
+    last_irrigation_depth_mm: float = 0.0,
 ) -> float:
     """Dispatch capillary rise computation based on configured method."""
     if config.cr_method == CRMethod.NONE:
@@ -490,12 +496,15 @@ def _compute_cr(
             assert soil.cr_a4 is not None
             assert soil.cr_b4 is not None
             dw = wt_depth_m
-            wwp_mm = (
-                compute_wwp_mm_multilayer(soil.layers, zr)
-                if soil.uses_multilayer() and soil.layers
-                else compute_wwp_mm(soil.theta_wp, zr)
-            )
-            w = (taw - dr) + wwp_mm
+            if soil.cr_theta_fc is not None:
+                w = soil.cr_theta_fc * zr * 1000.0 - dr
+            else:
+                wwp_mm = (
+                    compute_wwp_mm_multilayer(soil.layers, zr)
+                    if soil.uses_multilayer() and soil.layers
+                    else compute_wwp_mm(soil.theta_wp, zr)
+                )
+                w = (taw - dr) + wwp_mm
             etm = kcb * eto
             return compute_cr_parametric_complete_with_guards(
                 dw=dw,
@@ -510,7 +519,9 @@ def _compute_cr(
                 b3=soil.cr_b3,
                 a4=soil.cr_a4,
                 b4=soil.cr_b4,
+                zr_m=zr,
                 days_since_irrigation=days_since_irrigation,
+                last_irrig_depth_mm=last_irrigation_depth_mm,
             )
         if has_simplified and wt_depth_m is not None:
             assert soil.cr_simplified_a is not None

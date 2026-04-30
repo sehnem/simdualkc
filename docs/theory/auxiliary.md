@@ -25,11 +25,28 @@ $$CN_{III} = \frac{CN_{II}}{0.427 + 0.00573 \cdot CN_{II}}$$
 
 $$CR = \begin{cases} G_{max} & D_r \ge RAW \\ G_{max} \cdot D_r / RAW & 0 < D_r < RAW \\ 0 & D_r \le 0 \end{cases}$$
 
-### Parametric Method (Liu et al., 2006)
+### Full 8-parameter Method (Liu et al., 2006)
 
-$$CR = (a_1 \cdot z_{wt}^{b_1} + a_2 \cdot z_{wt}^{b_2}) \cdot \exp(-(a_3 \cdot z_{wt}^{b_3} + a_4 \cdot z_{wt}^{b_4}) \cdot LAI)$$
+Six-step piecewise algorithm where $D_w$ is water table depth [m], $W$ is absolute root-zone
+soil water storage [mm] (ASW + WWP), $ET_m = K_{cb} \cdot ET_0$ [mm/day], and coefficients
+depend on soil texture:
 
-where $z_{wt}$ is the water table depth from the surface [m] and coefficients depend on soil texture.
+1. $W_c = a_1 \cdot D_w^{b_1}$ — critical soil water storage [mm]
+2. $W_s = a_2 \cdot D_w^{b_2}$ ($D_w \le 3$ m) or $3.57 \cdot D_w^{-0.705}$ ($D_w > 3$ m) — steady storage [mm]
+3. $D_{wc} = a_3 \cdot ET_m + b_3$ if $ET_m \le 4$ else $1.4$ m — critical water-table depth [m]
+4. $k = 1 - e^{-0.6\,LAI}$ if $ET_m \le 4$ else $3.8 / ET_m$ — transpiration factor
+5. $CR_{max} = \min(k \cdot ET_m,\;3.8)$ if $D_w \le D_{wc}$, else $a_4 \cdot D_w^{b_4}$ — potential flux [mm/day]
+6. $CR = CR_{max}$ if $W < W_s$; $\;CR_{max}(W_c - W)/(W_c - W_s)$ if $W_s \le W \le W_c$; $\;0$ if $W > W_c$
+
+Coefficients $a_1, b_1$ (Wc), $a_2, b_2$ (Ws), $a_3, b_3$ (Dwc linear slope/intercept), and
+$a_4, b_4$ (deep-zone CRmax) are read from the soil database (`T_asc_capilar`).
+
+> **CR-specific field capacity (`cr_theta_fc`).**  The Liu et al. coefficients were calibrated
+> using the soil's `teor_fc` from `T_asc_capilar`, which may differ from the general `theta_fc`
+> used in the water-balance simulation.  When `soil.cr_theta_fc` is set, $W$ is computed as
+> $W = \theta_{fc,CR} \cdot Z_r \cdot 1000 - D_r$ rather than deriving it from TAW and WWP.
+> This eliminates a systematic bias caused by the wilting-point difference between the two
+> parameter sources ($\theta_{wp,CR}$ vs $\theta_{wp,sim}$).
 
 ## Deep Percolation
 
@@ -53,4 +70,4 @@ Key functions:
 - `compute_dp_simple(dr_before_dp)` — simple deep percolation
 - `compute_dp_parametric(storage, a_d, b_d)` — parametric DP
 - `compute_cr_constant(gmax, dr, raw)` — constant capillary rise
-- `compute_cr_parametric_complete(z_wt, lai, a1..b4)` — full parametric CR
+- `compute_cr_parametric_complete(dw, w, lai, etm, a1..b4, zr_m=0.0)` — full parametric CR (Liu et al. 2006) with root-zone clipping and Dw>3m fallback; caller must pass $W$ computed with `cr_theta_fc` when available

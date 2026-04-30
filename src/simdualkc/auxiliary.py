@@ -19,6 +19,14 @@ _AMC_I_B = 0.01281
 _AMC_III_A = 0.427
 _AMC_III_B = 0.00573
 
+# Liu et al. (2006) parametric CR fallback constants
+_CR_DW_STEADY_THRESHOLD_M = 3.0  # depth limit for a2*Dw^b2 steady storage
+_CR_WS_FALLBACK_A = 3.57  # Liu 2006 Eq. 5 coefficient for Dw > 3 m
+_CR_WS_FALLBACK_B = -0.705  # Liu 2006 Eq. 5 exponent for Dw > 3 m
+_CR_ETM_THRESHOLD_MM_DAY = 4.0  # ETm limit for low-stress parametric branch
+_CR_DWC_FALLBACK_M = 1.4  # fixed critical depth when ETm > 4 mm/day
+_CR_K_FALLBACK_NUMERATOR = 3.8  # transpiration factor numerator when ETm > 4 mm/day
+
 
 def cn_from_amc(cn2: float, *, amc_class: int) -> float:
     """Convert a CN_II number to AMC class I or III.
@@ -194,6 +202,7 @@ def compute_cr_parametric_complete(
     b3: float,
     a4: float,
     b4: float,
+    zr_m: float = 0.0,
 ) -> float:
     """Compute capillary rise via Liu et al. (2006) full parametric model.
 
@@ -204,13 +213,18 @@ def compute_cr_parametric_complete(
 
     Steps:
       1. Wc = a1 * Dw^b1                     (critical soil water storage)
-      2. Ws = a2 * Dw^b2  (Dw <= 3 m)        (steady soil water storage)
-      3. Dwc = a3 * ETm + b3   (ETm <= 4)    (critical groundwater depth)
-      4. k = 1 - exp(-0.6 * LAI)  (ETm <= 4) (transpiration factor)
+      2. Ws = a2 * Dw^b2  (Dw <= 3 m)
+              3.57 * Dw^-0.705  (Dw > 3 m)   (steady soil water storage)
+      3. Dwc = a3 * ETm + b3   (ETm <= 4 mm/day)
+              1.4 m            (ETm > 4 mm/day)   (critical groundwater depth)
+      4. k = 1 - exp(-0.6 * LAI)  (ETm <= 4 mm/day)
+             3.8 / ETm         (ETm > 4 mm/day)   (transpiration factor)
       5. CRmax = k * ETm  if Dw <= Dwc else a4 * Dw^b4
       6. CR = CRmax                     if W < Ws
               CRmax * (Wc-W)/(Wc-Ws)   if Ws <= W <= Wc
               0                         if W > Wc
+
+    Dw should be limited to a depth below the root zone (Liu 2006).
 
     Args:
         dw: Water table depth from surface [m].
@@ -218,24 +232,34 @@ def compute_cr_parametric_complete(
         lai: Leaf area index [m²/m²].
         etm: Potential crop transpiration [mm/day] (Kcb * ETo).
         a1, b1, a2, b2, a3, b3, a4, b4: Soil texture coefficients.
+        zr_m: Root depth [m].  Dw is clamped to max(dw, zr_m) so that the
+            water table is always evaluated at or below the root zone.
 
     Returns:
         Capillary rise [mm/day].
     """
+    dw = max(dw, zr_m)
+
     # 1. Critical soil water storage
     wc = a1 * (dw**b1)
 
     # 2. Steady soil water storage
-    ws = a2 * (dw**b2) if dw <= 3.0 else 240.0
+    if dw <= _CR_DW_STEADY_THRESHOLD_M:
+        ws = a2 * (dw**b2)
+    else:
+        ws = _CR_WS_FALLBACK_A * (dw**_CR_WS_FALLBACK_B)
 
-    # 3. Critical groundwater depth
-    dwc = a3 * etm + b3 if etm <= 4.0 else 1.4
+    # 3 & 4. Critical depth and transpiration factor (Liu 2006 piecewise on ETm)
+    if etm <= _CR_ETM_THRESHOLD_MM_DAY:
+        dwc = a3 * etm + b3
+        k = 1.0 - math.exp(-0.6 * lai)
+    else:
+        dwc = _CR_DWC_FALLBACK_M  # 1.4 m fixed for high transpiration
+        k = _CR_K_FALLBACK_NUMERATOR / etm  # 3.8/ETm so k·ETm = 3.8 cap
 
-    # 4. Transpiration factor
-    k = 1.0 - math.exp(-0.6 * lai) if etm <= 4.0 else 3.8 / etm
-
-    # 5. Potential capillary flux
+    # 5. Potential capillary flux (capped at 3.8 mm/day)
     cr_max = k * etm if dw <= dwc else a4 * (dw**b4)
+    cr_max = min(cr_max, _CR_K_FALLBACK_NUMERATOR)
 
     # 6. Actual capillary rise
     if w < ws:
@@ -260,21 +284,25 @@ def compute_cr_parametric_complete_with_guards(
     b3: float,
     a4: float,
     b4: float,
+    zr_m: float = 0.0,
     *,
     days_since_irrigation: int = 999,
+    last_irrig_depth_mm: float = 0.0,
 ) -> float:
     """Liu et al. (2006) parametric CR + empirical Access-software guards.
 
     Guards (reverse-engineered from original SIMDualKc T_Resultados):
     1. Early-season: if LAI < 0.3 and ETm <= 4.0, return 0.
-    2. Post-irrigation: if days_since_irrigation <= 2, return 0.
+    2. Post-irrigation: if days_since_irrigation <= 2 and
+       last_irrig_depth_mm > 20.0, return 0.
     """
     if lai < 0.3 and etm <= 4.0:
         return 0.0
-    if days_since_irrigation <= 2:
+    if days_since_irrigation <= 2 and last_irrig_depth_mm > 20.0:
         return 0.0
     return compute_cr_parametric_complete(
         dw=dw,
+        zr_m=zr_m,
         w=w,
         lai=lai,
         etm=etm,

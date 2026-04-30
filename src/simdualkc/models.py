@@ -116,6 +116,18 @@ class SoilParams(BaseModel):
     cr_b3: float | None = Field(default=None, description="Liu CR param b3")
     cr_a4: float | None = Field(default=None, description="Liu CR param a4")
     cr_b4: float | None = Field(default=None, description="Liu CR param b4")
+    cr_theta_fc: float | None = Field(
+        default=None,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "CR-specific field capacity [m³/m³] (teor_fc from T_asc_capilar). "
+            "When set, W = cr_theta_fc * Zr * 1000 - Dr is used for the Liu et al. "
+            "parametric CR model instead of the general soil theta_fc. The Liu coefficients "
+            "were calibrated against this CR-specific FC, so using the general theta_fc "
+            "can cause systematic bias."
+        ),
+    )
     cr_simplified_a: float | None = Field(default=None, description="Simplified Liu CR param a")
     cr_simplified_b: float | None = Field(default=None, description="Simplified Liu CR param b")
     cr_simplified_c: float | None = Field(default=None, description="Simplified Liu CR param c")
