@@ -113,7 +113,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
 
     results: list[DailyResult] = []
     last_irrigation_day = 0
-    last_irrigation_depth_mm = 0.0
 
     pond_storage_mm = 0.0
     farm_pond: FarmPondConstraint | None = None
@@ -176,19 +175,12 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             else:
                 kcb = compute_kcb_density(crop.kc_min, kd_val, kcb_full)
 
-        # Capture irrigation state *before* applying today's irrigation.
-        # The original Access software computes CR before applying the current
-        # day's irrigation, so days_since_irrigation reflects the *previous*
-        # irrigation event on the irrigation day itself.
-        prev_last_irrigation_day = last_irrigation_day
-
         # Get irrigation for this day (manual + automated)
         irrig, fw = _get_irrigation(date, config.irrigation, config.fw_base)
 
         # Manual irrigation resets the interval timer for automated scheduling
         if irrig > 0.0:
             last_irrigation_day = day_of_sim
-            last_irrigation_depth_mm = irrig
 
         if farm_pond is not None:
             for supply in farm_pond.supplies:
@@ -232,7 +224,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 if irrig_auto > 0.0:
                     irrig += irrig_auto
                     last_irrigation_day = day_of_sim
-                    last_irrigation_depth_mm = irrig
         elif strat.strategy_type == "deficit" and strat.deficit:
             mad = get_mad_for_day(day_of_sim, crop, strat.deficit)
             days_to_harvest = get_days_to_harvest(day_of_sim, crop)
@@ -266,7 +257,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
                 if irrig_auto > 0.0:
                     irrig += irrig_auto
                     last_irrigation_day = day_of_sim
-                    last_irrigation_depth_mm = irrig
 
         # Kc_max
         kc_max = compute_kc_max(kcb, u2, rh_min, h)
@@ -341,8 +331,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         t_act_sum += transp_act
         t_pot_sum += kcb * eto
 
-        # Capillary rise (uses yesterday's Dr; CR timing: before today's irrigation)
-        days_since_irrigation = day_of_sim - prev_last_irrigation_day
+        # Capillary rise (uses yesterday's Dr; computed before today's irrigation)
         cr = _compute_cr(
             config,
             dr,
@@ -355,8 +344,6 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             kcb,
             ke,
             eto,
-            days_since_irrigation,
-            last_irrigation_depth_mm,
         )
 
         # Root-zone depletion update (FAO-56 Eq. 85)
@@ -464,8 +451,6 @@ def _compute_cr(
     kcb: float,
     ke: float,
     eto: float,
-    days_since_irrigation: int = 999,
-    last_irrigation_depth_mm: float = 0.0,
 ) -> float:
     """Dispatch capillary rise computation based on configured method."""
     if config.cr_method == CRMethod.NONE:
@@ -520,8 +505,6 @@ def _compute_cr(
                 a4=soil.cr_a4,
                 b4=soil.cr_b4,
                 zr_m=zr,
-                days_since_irrigation=days_since_irrigation,
-                last_irrig_depth_mm=last_irrigation_depth_mm,
             )
         if has_simplified and wt_depth_m is not None:
             assert soil.cr_simplified_a is not None

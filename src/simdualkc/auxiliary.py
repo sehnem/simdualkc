@@ -21,8 +21,10 @@ _AMC_III_B = 0.00573
 
 # Liu et al. (2006) parametric CR fallback constants
 _CR_DW_STEADY_THRESHOLD_M = 3.0  # depth limit for a2*Dw^b2 steady storage
-_CR_WS_FALLBACK_A = 3.57  # Liu 2006 Eq. 5 coefficient for Dw > 3 m
-_CR_WS_FALLBACK_B = -0.705  # Liu 2006 Eq. 5 exponent for Dw > 3 m
+# Ws fallback for Dw > 3 m: Liu 2006 Eq. 5 fit gives 320.57*Dw^-0.2705 ≈ 240 mm constant.
+# Previous values (3.57, -0.705) were a transcription error producing ~2 mm instead of ~240 mm.
+_CR_WS_FALLBACK_A = 320.57
+_CR_WS_FALLBACK_B = -0.2705
 _CR_ETM_THRESHOLD_MM_DAY = 4.0  # ETm limit for low-stress parametric branch
 _CR_DWC_FALLBACK_M = 1.4  # fixed critical depth when ETm > 4 mm/day
 _CR_K_FALLBACK_NUMERATOR = 3.8  # transpiration factor numerator when ETm > 4 mm/day
@@ -257,8 +259,23 @@ def compute_cr_parametric_complete(
         dwc = _CR_DWC_FALLBACK_M  # 1.4 m fixed for high transpiration
         k = _CR_K_FALLBACK_NUMERATOR / etm  # 3.8/ETm so k·ETm = 3.8 cap
 
-    # 5. Potential capillary flux (capped at 3.8 mm/day)
-    cr_max = k * etm if dw <= dwc else a4 * (dw**b4)
+    # 5. Potential capillary flux.
+    # For ETm > 4, Dwc is fixed at 1.4 m (Liu Eq. 6) and k = 3.8/ETm (silt-loam
+    # calibrated).  This produces a discontinuity at Dwc for soils with small a4:
+    # the Dw<=Dwc branch gives 3.8 mm/d while the Dw>Dwc branch gives a4*Dwc^b4,
+    # which for clay-loam orchards (a4=1.11, b4=-0.98) is only ~0.80 mm/d — a 3 mm/d
+    # jump that is physically impossible.  Capping at the soil's hydraulic supply
+    # (a4*Dw^b4) for the ETm>4 case restores continuity and keeps the formula
+    # soil-specific.  For ETm<=4, Dwc = a3*ETm+b3 is already soil-specific and the
+    # k*ETm formula is appropriate (water table is well below Dwc so supply isn't
+    # limiting for the ETm<=4 case).
+    if dw <= dwc:
+        if etm > _CR_ETM_THRESHOLD_MM_DAY:
+            cr_max = min(k * etm, a4 * (dw**b4))
+        else:
+            cr_max = k * etm
+    else:
+        cr_max = a4 * (dw**b4)
     cr_max = min(cr_max, _CR_K_FALLBACK_NUMERATOR)
 
     # 6. Actual capillary rise
@@ -285,20 +302,18 @@ def compute_cr_parametric_complete_with_guards(
     a4: float,
     b4: float,
     zr_m: float = 0.0,
-    *,
-    days_since_irrigation: int = 999,
-    last_irrig_depth_mm: float = 0.0,
 ) -> float:
-    """Liu et al. (2006) parametric CR + empirical Access-software guards.
+    """Liu et al. (2006) parametric CR + Guard 1 (early-season suppression).
 
-    Guards (reverse-engineered from original SIMDualKc T_Resultados):
+    Guard (empirical, from original SIMDualKc T_Resultados):
     1. Early-season: if LAI < 0.3 and ETm <= 4.0, return 0.
-    2. Post-irrigation: if days_since_irrigation <= 2 and
-       last_irrig_depth_mm > 20.0, return 0.
+
+    Note: a post-irrigation guard (Guard 2) was removed because it was provably
+    wrong in both directions — it suppressed days with expected CR > 0 and missed
+    days that Access suppresses.  The correct post-irrigation suppression rule
+    requires Access VBA source to implement precisely.
     """
     if lai < 0.3 and etm <= 4.0:
-        return 0.0
-    if days_since_irrigation <= 2 and last_irrig_depth_mm > 20.0:
         return 0.0
     return compute_cr_parametric_complete(
         dw=dw,
